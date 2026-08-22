@@ -4,6 +4,9 @@
   <p align="center">
     <strong>Automação Inteligente de Backups para PostgreSQL</strong>
   </p>
+  <p align="center">
+    <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
+  </p>
 </p>
 
 O **DumpFlow** é uma solução open-source projetada para desenvolvedores e equipes que precisam automatizar o processo de dump (cópia de segurança) de seus bancos de dados PostgreSQL e enviá-los de forma segura para provedores de nuvem (AWS S3 ou Google Drive) de maneira programada e assíncrona.
