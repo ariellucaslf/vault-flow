@@ -1,4 +1,4 @@
-import { prisma } from "@dump-flow/db";
+import { prisma } from "@vault-flow/db";
 import Link from "next/link";
 import { Plus, Database, Clock, Cloud, Trash2, Play } from "lucide-react";
 import { deleteProject } from "../../actions/project.actions";

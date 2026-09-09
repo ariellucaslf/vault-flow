@@ -1,4 +1,4 @@
-import { Database, Home, Settings, Activity } from "lucide-react";
+import { Database, Home, Settings, Activity, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { authOptions } from "../../lib/auth";
@@ -17,9 +17,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <div className="space-y-8">
           <div className="flex items-center gap-3 px-2">
             <div className="w-8 h-8 bg-blue-500/10 rounded-lg flex items-center justify-center border border-blue-500/20">
-              <Database className="w-4 h-4 text-blue-400" />
+              <ShieldCheck className="w-4 h-4 text-blue-400" />
             </div>
-            <span className="font-semibold text-white tracking-tight">DumpFlow</span>
+            <span className="font-semibold text-white tracking-tight">VaultFlow</span>
           </div>
           
           <nav className="flex flex-col gap-2">

@@ -1,6 +1,6 @@
 "use server";
 
-import { prisma } from "@dump-flow/db";
+import { prisma } from "@vault-flow/db";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";

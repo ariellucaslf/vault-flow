@@ -11,7 +11,7 @@
     "check-types": "next typegen && tsc --noEmit"
   },
   "dependencies": {
-    "@dump-flow/db": "^0.1.0",
+    "@vault-flow/db": "*",
     "@repo/ui": "*",
     "@tailwindcss/postcss": "^4.3.3",
     "bcryptjs": "^3.0.3",

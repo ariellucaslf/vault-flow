@@ -1,7 +1,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "../../lib/auth";
 import { redirect } from "next/navigation";
-import { prisma } from "@dump-flow/db";
+import { prisma } from "@vault-flow/db";
 import { Database, HardDrive, Clock, Activity } from "lucide-react";
 
 export default async function Dashboard() {

@@ -1,5 +1,5 @@
 {
-  "name": "@dump-flow/api",
+  "name": "@vault-flow/api",
   "version": "0.1.0",
   "main": "dist/index.js",
   "scripts": {
@@ -11,7 +11,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.687.0",
     "@aws-sdk/lib-storage": "^3.687.0",
-    "@dump-flow/db": "*",
+    "@vault-flow/db": "*",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.1",

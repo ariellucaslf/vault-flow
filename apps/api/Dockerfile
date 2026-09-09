@@ -5,8 +5,8 @@ WORKDIR /app
 RUN npm install -g turbo
 # Copia todo o monorepo
 COPY . .
-# Extrai apenas as dependências do apps/api e pacotes locais que ele usa (@dump-flow/db)
-RUN turbo prune --scope=@dump-flow/api --docker
+# Extrai apenas as dependências do apps/api e pacotes locais que ele usa (@vault-flow/db)
+RUN turbo prune --scope=@vault-flow/api --docker
 
 FROM node:20-alpine AS installer
 RUN apk update && apk add --no-cache libc6-compat
@@ -18,9 +18,9 @@ COPY --from=builder /app/out/package-lock.json ./package-lock.json
 RUN npm install
 COPY --from=builder /app/out/full/ .
 # Gera os arquivos do Prisma no node_modules
-RUN npm run generate -w @dump-flow/db
+RUN npm run generate -w @vault-flow/db
 # Faz o build via Turborepo
-RUN npx turbo run build --filter=@dump-flow/api
+RUN npx turbo run build --filter=@vault-flow/api
 
 FROM node:20-alpine AS runner
 
@@ -47,4 +47,4 @@ ENV PORT=4000
 ENV NODE_ENV=production
 
 # Inicializa o backend compilado
-CMD ["npm", "run", "start", "-w", "@dump-flow/api"]
+CMD ["npm", "run", "start", "-w", "@vault-flow/api"]

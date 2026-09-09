@@ -1,5 +1,5 @@
 {
-  "name": "@dump-flow/db",
+  "name": "@vault-flow/db",
   "version": "0.1.0",
   "main": "./index.ts",
   "types": "./index.ts",

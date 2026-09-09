@@ -1,4 +1,4 @@
-import { prisma } from "@dump-flow/db";
+import { prisma } from "@vault-flow/db";
 import { CheckCircle2, XCircle, Clock, Activity } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";

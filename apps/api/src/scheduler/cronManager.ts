@@ -1,5 +1,5 @@
 import cron from 'node-cron';
-import { prisma } from '@dump-flow/db';
+import { prisma } from '@vault-flow/db';
 import { runBackupForProject } from '../services/backupOrchestrator';
 
 export async function initCronJobs() {

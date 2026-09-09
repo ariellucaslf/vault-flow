@@ -3,8 +3,8 @@ import "./globals.css";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
-  title: "DumpFlow | Backup Orchestrator",
-  description: "Orquestrador de backups do PostgreSQL de alta performance",
+  title: "VaultFlow | Cloud Backup & Storage Orchestrator",
+  description: "Orquestrador de backups de bancos de dados e storages de alta performance",
 };
 
 export default function RootLayout({

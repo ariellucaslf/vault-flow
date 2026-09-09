@@ -1,5 +1,5 @@
 {
-  "name": "dump-flow",
+  "name": "vault-flow",
   "private": true,
   "scripts": {
     "build": "turbo run build",

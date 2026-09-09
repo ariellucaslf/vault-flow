@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { prisma } from '@dump-flow/db';
+import { prisma } from '@vault-flow/db';
 import { initCronJobs } from './scheduler/cronManager';
 import 'dotenv/config';
 

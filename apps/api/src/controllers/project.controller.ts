@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { prisma } from '@dump-flow/db';
+import { prisma } from '@vault-flow/db';
 import { runBackupForProject } from '../services/backupOrchestrator';
 
 export const listProjects = async (req: Request, res: Response) => {

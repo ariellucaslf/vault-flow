@@ -3,7 +3,7 @@
 import { signIn } from "next-auth/react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Database, Lock, User } from "lucide-react";
+import { ShieldCheck, Lock, User } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -37,10 +37,10 @@ export default function LoginPage() {
 
         <div className="text-center relative z-10">
           <div className="mx-auto w-12 h-12 bg-blue-500/10 rounded-xl flex items-center justify-center mb-4 border border-blue-500/20">
-            <Database className="text-blue-400 w-6 h-6" />
+            <ShieldCheck className="text-blue-400 w-6 h-6" />
           </div>
           <h1 className="text-2xl font-semibold text-white tracking-tight">
-            DumpFlow
+            VaultFlow
           </h1>
           <p className="text-sm text-neutral-400 mt-2">
             Acesse o painel para orquestrar seus backups.

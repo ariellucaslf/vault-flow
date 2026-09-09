@@ -1,4 +1,4 @@
-import { prisma } from '@dump-flow/db';
+import { prisma } from '@vault-flow/db';
 import { executePgDump } from './backupService';
 import { uploadToS3, uploadToGoogleDrive } from './storageService';
 import { PassThrough } from 'stream';
