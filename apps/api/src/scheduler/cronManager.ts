@@ -1,30 +1,34 @@
-import cron from 'node-cron';
-import { prisma } from '@vault-flow/db';
-import { runBackupForProject } from '../services/backupOrchestrator';
+import cron from "node-cron";
+import { prisma } from "@vault-flow/db";
+import { runBackupForProject } from "../services/backupOrchestrator";
 
 export async function initCronJobs() {
-  console.log('🔄 Initializing backup schedules...');
-  
+  console.log("🔄 Inicializando agendamentos de backup automáticos...");
+
   try {
     const projects = await prisma.project.findMany();
 
     for (const project of projects) {
       if (!cron.validate(project.cronSchedule)) {
-        console.error(`❌ Invalid cron schedule for project ${project.name}: ${project.cronSchedule}`);
+        console.error("❌ Expressão cron inválida para o projeto " + project.name + ": " + project.cronSchedule);
         continue;
       }
 
-      console.log(`🕒 Scheduling backup for [${project.name}] with cron: ${project.cronSchedule}`);
-      
+      const typeLabel = project.type === "STORAGE" ? "STORAGE" : "DATABASE";
+      console.log("🕒 Agendando backup [" + typeLabel + "] para [" + project.name + "] com cron: " + project.cronSchedule);
+
       cron.schedule(project.cronSchedule, async () => {
         try {
           await runBackupForProject(project.id);
-        } catch (e) {
-          // Error is already logged in runBackupForProject
+        } catch (err: unknown) {
+          // O erro já é registrado no BackupLog dentro de runBackupForProject
+          const msg = err instanceof Error ? err.message : "Erro desconhecido";
+          console.error("❌ Erro na execução agendada do projeto " + project.name + ": " + msg);
         }
       });
     }
-  } catch (error) {
-    console.error('❌ Failed to initialize cron jobs', error);
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : "Erro desconhecido";
+    console.error("❌ Falha ao inicializar rotinas agendadas (Cron):", msg);
   }
 }
