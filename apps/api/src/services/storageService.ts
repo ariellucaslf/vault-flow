@@ -6,7 +6,9 @@ import { Readable, PassThrough } from 'stream';
 export interface S3Credentials {
   accessKeyId: string;
   secretAccessKey: string;
-  region: string;
+  region?: string;
+  endpoint?: string;
+  forcePathStyle?: boolean;
 }
 
 export async function uploadToS3(
@@ -16,7 +18,9 @@ export async function uploadToS3(
   credentials: S3Credentials
 ) {
   const s3Client = new S3Client({
-    region: credentials.region,
+    region: credentials.region || 'us-east-1',
+    endpoint: credentials.endpoint || undefined,
+    forcePathStyle: credentials.forcePathStyle ?? Boolean(credentials.endpoint),
     credentials: {
       accessKeyId: credentials.accessKeyId,
       secretAccessKey: credentials.secretAccessKey,
