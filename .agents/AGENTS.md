@@ -1,4 +1,4 @@
-# Global Agent Directives & Engineering Standards (`GEMINI.md`)
+# Global Agent Directives & Engineering Standards
 
 This document defines the architectural guidelines, development workflows, security policies, and technical standards for AI agents and developers working on this project.
 
