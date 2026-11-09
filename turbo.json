@@ -3,30 +3,19 @@
   "ui": "tui",
   "tasks": {
     "build": {
-      "dependsOn": [
-        "^build"
-      ],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        ".env*"
-      ],
-      "outputs": [
-        ".next/**",
-        "!.next/cache/**",
-        "!.next/dev/**",
-        "dist/**"
-      ]
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", ".env*"],
+      "outputs": [".next/**", "!.next/cache/**", "!.next/dev/**", "dist/**"]
     },
     "lint": {
-      "dependsOn": [
-        "^lint"
-      ]
+      "dependsOn": ["^lint"]
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "cache": false
     },
     "check-types": {
-      "dependsOn": [
-        "@vault-flow/db#build",
-        "^check-types"
-      ]
+      "dependsOn": ["@vault-flow/db#build", "^check-types"]
     },
     "dev": {
       "cache": false,
@@ -50,9 +39,8 @@
     "ALLOWED_LOCAL_BACKUP_ROOTS",
     "BACKUP_TIMEOUT_MS",
     "MAX_CONCURRENT_BACKUPS",
-    "CRON_TIMEZONE"
+    "CRON_TIMEZONE",
+    "CRON_RECONCILE_INTERVAL_MS"
   ],
-  "globalPassThroughEnv": [
-    "PATH"
-  ]
+  "globalPassThroughEnv": ["PATH"]
 }
