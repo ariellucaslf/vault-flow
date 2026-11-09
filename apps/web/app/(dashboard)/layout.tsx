@@ -5,6 +5,8 @@ import { authOptions } from "../../lib/auth";
 import { redirect } from "next/navigation";
 import { UserAccountMenu } from "./user-menu";
 
+export const dynamic = "force-dynamic";
+
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await getServerSession(authOptions);
   
