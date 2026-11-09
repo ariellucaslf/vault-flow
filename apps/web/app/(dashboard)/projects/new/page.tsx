@@ -132,7 +132,7 @@ export default function NewProjectPage() {
                 >
                   <option value="AWS_S3">Amazon S3</option>
                   <option value="S3_COMPATIBLE">S3 Compatível (MinIO, Cloudflare R2, Wasabi)</option>
-                  <option value="GOOGLE_DRIVE">Google Drive</option>
+                  <option value="GOOGLE_DRIVE">Google Drive (experimental)</option>
                   <option value="LOCAL_PATH">Diretório Local do Servidor</option>
                 </select>
               </div>
@@ -164,11 +164,16 @@ export default function NewProjectPage() {
                 <label className="block text-sm font-medium text-neutral-300 mb-1">Prefixo ou Subpasta Opcional</label>
                 <input 
                   name="storagePrefix" 
+                  disabled={storageType === "GOOGLE_DRIVE"}
                   type="text" 
                   placeholder="Ex: media/avatars/ ou 2026/"
                   className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-white focus:ring-2 focus:ring-purple-500 outline-none font-mono text-sm" 
                 />
-                <p className="text-xs text-neutral-500 mt-1">Deixe em branco para incluir todos os arquivos da raiz.</p>
+                <p className="text-xs text-neutral-500 mt-1">
+                  {storageType === "GOOGLE_DRIVE"
+                    ? "Use a pasta de origem desejada. Prefixos e arquivos nativos do Google ainda não são suportados."
+                    : "Deixe em branco para incluir todos os arquivos da raiz."}
+                </p>
               </div>
 
               <div>
@@ -271,7 +276,7 @@ export default function NewProjectPage() {
               className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500 outline-none appearance-none"
             >
               <option value="AWS_S3">Amazon S3 ou S3 Compatível</option>
-              <option value="GOOGLE_DRIVE">Google Drive</option>
+              <option value="GOOGLE_DRIVE">Google Drive (experimental)</option>
             </select>
           </div>
 
