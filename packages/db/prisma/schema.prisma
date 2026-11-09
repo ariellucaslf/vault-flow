@@ -14,6 +14,8 @@ model Project {
   type            String         @default("DATABASE") // "DATABASE" | "STORAGE"
   dbUrl           String?        // Connection string (protegida) - opcional para projetos de storage
   cronSchedule    String         // Padrão Cron (ex: "0 3 * * 1")
+  timezone        String         @default("UTC") // Timezone IANA validado para o agendamento cron
+  enabled         Boolean        @default(true)  // Permite pausar/reativar agendamentos sem remover o projeto
   storageSource   StorageSource?
   destinations    Destination[] 
   logs            BackupLog[]
@@ -41,14 +43,18 @@ model Destination {
 }
 
 model BackupLog {
-  id              String   @id @default(uuid())
-  status          String   // Enum adaptado: "SUCCESS" | "FAILED" | "IN_PROGRESS"
+  id              String    @id @default(uuid())
+  status          String    // "SUCCESS" | "FAILED" | "IN_PROGRESS" | "SKIPPED_BUSY"
+  triggerType     String    @default("MANUAL") // "MANUAL" | "SCHEDULED"
   errorMessage    String?
-  fileSize        BigInt?  // Tamanho do backup gerado (em bytes, BigInt para suportar dezenas/centenas de GBs)
-  fileCount       Int?     // Quantidade de arquivos processados no snapshot
-  executedAt      DateTime @default(now())
+  fileSize        BigInt?   // Tamanho do backup gerado (em bytes, BigInt para suportar dezenas/centenas de GBs)
+  fileCount       Int?      // Quantidade de arquivos processados no snapshot
+  artifactKey     String?   // Identificação do objeto remoto gerado (ex: s3://bucket/key)
+  checksumSha256  String?   // Hash SHA-256 calculado em streaming para verificação de integridade
+  executedAt      DateTime  @default(now())
+  completedAt     DateTime?
   projectId       String
-  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project         Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
 
 model User {
