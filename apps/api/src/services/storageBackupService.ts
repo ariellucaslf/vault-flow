@@ -1,6 +1,6 @@
 import { TarArchive } from "archiver";
 import { Readable, PassThrough } from "stream";
-import { IStorageProvider, StorageFileItem } from "./providers/storageProvider.interface";
+import { IStorageProvider } from "./providers/storageProvider.interface";
 import { S3StorageProvider } from "./providers/s3Provider";
 import { GoogleDriveStorageProvider } from "./providers/googleDriveProvider";
 import { LocalStorageProvider } from "./providers/localProvider";
@@ -37,8 +37,9 @@ export function createStorageProvider(source: StorageSourceInput): IStorageProvi
 
       try {
         creds = JSON.parse(source.credentials);
-      } catch (e) {
-        throw new Error("Credenciais de S3 inválidas. Esperado formato JSON.");
+      } catch (err: unknown) {
+        const reason = err instanceof Error ? err.message : "JSON malformado";
+        throw new Error("Credenciais de S3 inválidas. Esperado formato JSON (" + reason + ").");
       }
 
       return new S3StorageProvider({
@@ -98,36 +99,39 @@ export async function executeStorageBackup(source: StorageSourceInput): Promise<
   const totalOriginalBytes = files.reduce((acc, f) => acc + f.size, 0);
 
   // Executa o empacotamento assincronamente mantendo o stream ativo
-  const donePromise = new Promise<void>(async (resolve, reject) => {
+  const donePromise = new Promise<void>((resolve, reject) => {
     archive.on("error", (err: Error) => {
       console.error("❌ Erro no arquivamento de storage:", err);
       reject(err);
     });
 
-    try {
-      if (files.length === 0) {
-        // Se a pasta estiver vazia, cria um arquivo indicador para manter integridade do tar.gz
-        archive.append(
-          "VaultFlow Storage Backup\nOrigem: " + source.targetFolder + "\nData: " + new Date().toISOString() + "\nStatus: Pasta vazia\n",
-          { name: ".vaultflow-empty-snapshot.txt" }
-        );
-      } else {
-        for (let i = 0; i < files.length; i++) {
-          const file = files[i];
-          console.log("  [" + (i + 1) + "/" + files.length + "] Compactando: " + file.key + " (" + Math.round(file.size / 1024) + " KB)");
-          const fileStream = await provider.getFileStream(file);
-          archive.append(fileStream, { name: file.key });
+    void (async () => {
+      try {
+        if (files.length === 0) {
+          // Se a pasta estiver vazia, cria um arquivo indicador para manter integridade do tar.gz
+          archive.append(
+            "VaultFlow Storage Backup\nOrigem: " + source.targetFolder + "\nData: " + new Date().toISOString() + "\nStatus: Pasta vazia\n",
+            { name: ".vaultflow-empty-snapshot.txt" }
+          );
+        } else {
+          for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            if (!file) continue;
+            console.log("  [" + (i + 1) + "/" + files.length + "] Compactando: " + file.key + " (" + Math.round(file.size / 1024) + " KB)");
+            const fileStream = await provider.getFileStream(file);
+            archive.append(fileStream, { name: file.key });
+          }
         }
-      }
 
-      await archive.finalize();
-      console.log("✅ Arquivamento streaming do storage finalizado com sucesso.");
-      resolve();
-    } catch (err) {
-      console.error("❌ Falha durante a iteração de arquivos de storage:", err);
-      archive.destroy();
-      reject(err);
-    }
+        await archive.finalize();
+        console.log("✅ Arquivamento streaming do storage finalizado com sucesso.");
+        resolve();
+      } catch (err) {
+        console.error("❌ Falha durante a iteração de arquivos de storage:", err);
+        archive.destroy();
+        reject(err);
+      }
+    })();
   });
 
   return {
