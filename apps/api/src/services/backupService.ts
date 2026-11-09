@@ -1,19 +1,18 @@
-import { spawn } from 'child_process';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
-import { Readable } from 'stream';
+import { spawn } from "child_process";
+import fs from "fs";
+import os from "os";
+import path from "path";
+import { Readable } from "stream";
 
 const MAX_STDERR_BYTES = 4096;
 const DEFAULT_PG_DUMP_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutos
 const PRISMA_ONLY_QUERY_PARAMS = [
-  'schema',
-  'pgbouncer',
-  'connection_limit',
-  'pool_timeout',
-  'statement_cache_size',
-  'socket_timeout',
-  'connect_timeout',
+  "schema",
+  "pgbouncer",
+  "connection_limit",
+  "pool_timeout",
+  "statement_cache_size",
+  "socket_timeout",
 ];
 
 export interface PgDumpOptions {
@@ -31,13 +30,22 @@ export interface PgDumpExecution {
  */
 export function sanitizeDiagnosticMessage(input: string): string {
   return input
-    .replace(/postgres(?:ql)?:\/\/[^\s"'<>]+/gi, 'postgresql://[REDACTED]')
-    .replace(/(password|passwd|pwd|secret|token|accessKeyId|secretAccessKey)\s*[:=]\s*[^\s,;'"&]+/gi, '$1=[REDACTED]')
+    .replace(
+      /-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g,
+      "[REDACTED PRIVATE KEY]",
+    )
+    .replace(/postgres(?:ql)?:\/\/[^\s"'<>]+/gi, "postgresql://[REDACTED]")
+    .replace(/(https?:\/\/)[^/\s@]+@/gi, "$1[REDACTED]@")
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
+    .replace(
+      /(["']?(?:password|passwd|pwd|secret|token|accessKeyId|secretAccessKey|private_key|client_secret|access_token|refresh_token|api[_-]?key)["']?)\s*[:=]\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;'"&]+)/gi,
+      "$1=[REDACTED]",
+    )
     .trim();
 }
 
 function escapePgPassField(value: string): string {
-  return value.replace(/\\/g, '\\\\').replace(/:/g, '\\:');
+  return value.replace(/\\/g, "\\\\").replace(/:/g, "\\:");
 }
 
 interface PreparedPgConnection {
@@ -52,33 +60,102 @@ function preparePgConnection(rawDbUrl: string): PreparedPgConnection {
   try {
     parsed = new URL(rawDbUrl);
   } catch {
-    throw new Error('URL do banco de dados PostgreSQL inválida.');
+    throw new Error("URL do banco de dados PostgreSQL inválida.");
   }
 
-  if (parsed.protocol !== 'postgresql:' && parsed.protocol !== 'postgres:') {
-    throw new Error('Protocolo de banco de dados inválido. Use postgresql:// ou postgres://.');
+  if (parsed.protocol !== "postgresql:" && parsed.protocol !== "postgres:") {
+    throw new Error(
+      "Protocolo de banco de dados inválido. Use postgresql:// ou postgres://.",
+    );
   }
 
-  const dbName = parsed.pathname.replace(/^\/+/, '');
+  const dbName = parsed.pathname.replace(/^\/+/, "");
   if (!parsed.hostname || !dbName) {
-    throw new Error('URL do PostgreSQL incompleta: host e nome do banco são obrigatórios.');
+    throw new Error(
+      "URL do PostgreSQL incompleta: host e nome do banco são obrigatórios.",
+    );
   }
 
-  let password = '';
+  // libpq segue URI percent-encoding, não application/x-www-form-urlencoded.
+  // Um '+' literal não é um espaço na senha ou nos demais parâmetros.
   try {
-    password = parsed.password ? decodeURIComponent(parsed.password) : '';
+    if (decodeURIComponent(parsed.search).includes("\0"))
+      throw new Error("NUL");
   } catch {
-    password = parsed.password;
+    throw new Error("Codificação de parâmetros PostgreSQL inválida.");
+  }
+  parsed.search = parsed.search.replace(/\+/g, "%2B");
+
+  let password = "";
+  try {
+    password = decodeURIComponent(parsed.password);
+  } catch {
+    throw new Error("Codificação da senha PostgreSQL inválida.");
+  }
+  const queryPasswords = parsed.searchParams.getAll("password");
+  if (
+    queryPasswords.length > 1 ||
+    (password && queryPasswords.length && password !== queryPasswords[0])
+  ) {
+    throw new Error(
+      "A URL PostgreSQL contém senhas duplicadas ou conflitantes.",
+    );
+  }
+  password = queryPasswords[0] ?? password;
+  if (/[\r\n\0]/.test(password)) {
+    throw new Error(
+      "A senha PostgreSQL contém caracteres incompatíveis com o arquivo de autenticação.",
+    );
+  }
+  parsed.searchParams.delete("password");
+
+  // O libpq aceita opções que sobrescrevem host, credenciais e caminhos locais.
+  // Manter somente parâmetros conhecidos, sem alternativas para arquivos/comandos.
+  const allowedParams = new Set([
+    ...PRISMA_ONLY_QUERY_PARAMS,
+    "sslmode",
+    "application_name",
+    "connect_timeout",
+    "channel_binding",
+    "target_session_attrs",
+  ]);
+  for (const key of parsed.searchParams.keys()) {
+    if (
+      !allowedParams.has(key) ||
+      parsed.searchParams.getAll(key).length !== 1
+    ) {
+      throw new Error(
+        "A URL PostgreSQL contém parâmetro não permitido ou duplicado.",
+      );
+    }
+  }
+  const sslmode = parsed.searchParams.get("sslmode");
+  if (
+    sslmode &&
+    ![
+      "disable",
+      "allow",
+      "prefer",
+      "require",
+      "verify-ca",
+      "verify-full",
+    ].includes(sslmode)
+  ) {
+    throw new Error("Parâmetro sslmode inválido na URL PostgreSQL.");
+  }
+  const connectTimeout = parsed.searchParams.get("connect_timeout");
+  if (connectTimeout && !/^[1-9]\d{0,2}$/.test(connectTimeout)) {
+    throw new Error("connect_timeout deve estar entre 1 e 999 segundos.");
   }
 
   // Nunca manter a senha na URI passada por argumento de linha de comando
-  parsed.password = '';
+  parsed.password = "";
 
   let schemaArg: string | null = null;
-  const rawSchema = parsed.searchParams.get('schema');
-  if (rawSchema && rawSchema !== 'public') {
+  const rawSchema = parsed.searchParams.get("schema");
+  if (rawSchema && rawSchema !== "public") {
     if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(rawSchema)) {
-      throw new Error('Parâmetro schema inválido na URL do banco de dados.');
+      throw new Error("Parâmetro schema inválido na URL do banco de dados.");
     }
     schemaArg = rawSchema;
   }
@@ -86,15 +163,21 @@ function preparePgConnection(rawDbUrl: string): PreparedPgConnection {
   for (const param of PRISMA_ONLY_QUERY_PARAMS) {
     parsed.searchParams.delete(param);
   }
+  parsed.search = [...parsed.searchParams]
+    .map(
+      ([key, value]) =>
+        `${encodeURIComponent(key)}=${encodeURIComponent(value)}`,
+    )
+    .join("&");
 
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vf-pg-'));
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "vf-pg-"));
   fs.chmodSync(tempDir, 0o700);
 
   let pgpassFile: string | null = null;
   if (password) {
-    pgpassFile = path.join(tempDir, '.pgpass');
+    pgpassFile = path.join(tempDir, ".pgpass");
     const pgpassLine = `*:*:*:*:${escapePgPassField(password)}\n`;
-    fs.writeFileSync(pgpassFile, pgpassLine, { encoding: 'utf8', mode: 0o600 });
+    fs.writeFileSync(pgpassFile, pgpassLine, { encoding: "utf8", mode: 0o600 });
     fs.chmodSync(pgpassFile, 0o600);
   }
 
@@ -115,8 +198,11 @@ function cleanupPreparedConnection(prepared: PreparedPgConnection): void {
       fs.rmSync(prepared.tempDir, { recursive: true, force: true });
     }
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'erro desconhecido';
-    console.warn('⚠️ Falha ao limpar diretório temporário do pg_dump:', sanitizeDiagnosticMessage(msg));
+    const msg = err instanceof Error ? err.message : "erro desconhecido";
+    console.warn(
+      "⚠️ Falha ao limpar diretório temporário do pg_dump:",
+      sanitizeDiagnosticMessage(msg),
+    );
   }
 }
 
@@ -125,7 +211,10 @@ function cleanupPreparedConnection(prepared: PreparedPgConnection): void {
  * e ambiente mínimo. Retorna o stream de saída, uma Promise de conclusão verificada
  * e uma função de cancelamento explícito.
  */
-export function executePgDump(dbUrl: string, options?: PgDumpOptions): PgDumpExecution {
+export function executePgDump(
+  dbUrl: string,
+  options?: PgDumpOptions,
+): PgDumpExecution {
   const prepared = preparePgConnection(dbUrl);
   const timeoutMs =
     options?.timeoutMs ??
@@ -133,31 +222,36 @@ export function executePgDump(dbUrl: string, options?: PgDumpOptions): PgDumpExe
       ? Number(process.env.BACKUP_TIMEOUT_MS)
       : DEFAULT_PG_DUMP_TIMEOUT_MS);
 
-  const args = ['-d', prepared.sanitizedUri, '-F', 'c', '--no-password'];
+  const args = ["-d", prepared.sanitizedUri, "-F", "c", "--no-password"];
   if (prepared.schemaArg) {
-    args.push('-n', prepared.schemaArg);
+    args.push("-n", prepared.schemaArg);
   }
 
   const childEnv: NodeJS.ProcessEnv = {
-    PATH: process.env.PATH || '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+    PATH:
+      process.env.PATH ||
+      "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
     HOME: prepared.tempDir,
     TMPDIR: prepared.tempDir,
-    PGCONNECT_TIMEOUT: '15',
+    PGCONNECT_TIMEOUT: "15",
     ...(prepared.pgpassFile ? { PGPASSFILE: prepared.pgpassFile } : {}),
   };
 
-  console.log('🔄 Iniciando processo pg_dump...');
+  console.log("🔄 Iniciando processo pg_dump...");
 
   let pgDump: ReturnType<typeof spawn>;
   try {
-    pgDump = spawn('pg_dump', args, {
+    pgDump = spawn("pg_dump", args, {
       env: childEnv,
       shell: false,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ["ignore", "pipe", "pipe"],
     });
   } catch (err: unknown) {
     cleanupPreparedConnection(prepared);
-    const msg = err instanceof Error ? sanitizeDiagnosticMessage(err.message) : 'Erro ao invocar pg_dump';
+    const msg =
+      err instanceof Error
+        ? sanitizeDiagnosticMessage(err.message)
+        : "Erro ao invocar pg_dump";
     throw new Error(`Falha ao iniciar pg_dump: ${msg}`);
   }
 
@@ -166,23 +260,24 @@ export function executePgDump(dbUrl: string, options?: PgDumpOptions): PgDumpExe
 
   if (!stdout || !stderr) {
     cleanupPreparedConnection(prepared);
-    pgDump.kill('SIGKILL');
-    throw new Error('Falha ao inicializar pipes de comunicação do pg_dump.');
+    pgDump.kill("SIGKILL");
+    throw new Error("Falha ao inicializar pipes de comunicação do pg_dump.");
   }
 
-  let stderrCollected = '';
+  let stderrCollected = "";
   let stderrTruncated = false;
   let settled = false;
   let abortReason: string | null = null;
   let killEscalationTimer: NodeJS.Timeout | null = null;
 
-  stderr.on('data', (chunk: Buffer) => {
-    const piece = sanitizeDiagnosticMessage(chunk.toString('utf8'));
+  stderr.on("data", (chunk: Buffer) => {
+    const piece = sanitizeDiagnosticMessage(chunk.toString("utf8"));
     if (!piece) return;
 
     if (stderrCollected.length < MAX_STDERR_BYTES) {
       const remaining = MAX_STDERR_BYTES - stderrCollected.length;
-      stderrCollected += (stderrCollected ? ' | ' : '') + piece.slice(0, remaining);
+      stderrCollected +=
+        (stderrCollected ? " | " : "") + piece.slice(0, remaining);
       if (piece.length > remaining) {
         stderrTruncated = true;
       }
@@ -192,22 +287,24 @@ export function executePgDump(dbUrl: string, options?: PgDumpOptions): PgDumpExe
   });
 
   const formatStderrDetail = (): string => {
-    if (!stderrCollected) return 'Sem saída adicional em stderr.';
-    return stderrTruncated ? `${stderrCollected}... [truncado]` : stderrCollected;
+    if (!stderrCollected) return "Sem saída adicional em stderr.";
+    return stderrTruncated
+      ? `${stderrCollected}... [truncado]`
+      : stderrCollected;
   };
 
-  const abort = (reason = 'Execução do pg_dump cancelada.'): void => {
+  const abort = (reason = "Execução do pg_dump cancelada."): void => {
     if (settled) return;
     if (!abortReason) {
       abortReason = sanitizeDiagnosticMessage(reason);
     }
 
     if (pgDump.exitCode === null && pgDump.signalCode === null) {
-      pgDump.kill('SIGTERM');
+      pgDump.kill("SIGTERM");
       if (!killEscalationTimer) {
         killEscalationTimer = setTimeout(() => {
           if (pgDump.exitCode === null && pgDump.signalCode === null) {
-            pgDump.kill('SIGKILL');
+            pgDump.kill("SIGKILL");
           }
         }, 3000);
         killEscalationTimer.unref();
@@ -216,7 +313,9 @@ export function executePgDump(dbUrl: string, options?: PgDumpOptions): PgDumpExe
   };
 
   const timeoutHandle = setTimeout(() => {
-    abort(`Tempo limite de ${Math.round(timeoutMs / 1000)}s excedido durante execução do pg_dump.`);
+    abort(
+      `Tempo limite de ${Math.round(timeoutMs / 1000)}s excedido durante execução do pg_dump.`,
+    );
   }, timeoutMs);
   timeoutHandle.unref();
 
@@ -240,16 +339,16 @@ export function executePgDump(dbUrl: string, options?: PgDumpOptions): PgDumpExe
       reject(error);
     };
 
-    pgDump.on('error', (err: Error) => {
+    pgDump.on("error", (err: Error) => {
       const code = (err as NodeJS.ErrnoException).code;
       const hint =
-        code === 'ENOENT'
-          ? 'Binário pg_dump não encontrado no sistema (instale postgresql-client).'
+        code === "ENOENT"
+          ? "Binário pg_dump não encontrado no sistema (instale postgresql-client)."
           : sanitizeDiagnosticMessage(err.message);
       fail(new Error(`Falha ao executar pg_dump: ${hint}`));
     });
 
-    pgDump.on('close', (code: number | null, signal: NodeJS.Signals | null) => {
+    pgDump.on("close", (code: number | null, signal: NodeJS.Signals | null) => {
       if (settled) return;
 
       if (abortReason) {
@@ -258,18 +357,26 @@ export function executePgDump(dbUrl: string, options?: PgDumpOptions): PgDumpExe
       }
 
       if (signal) {
-        fail(new Error(`Processo pg_dump encerrado pelo sinal ${signal}. ${formatStderrDetail()}`));
+        fail(
+          new Error(
+            `Processo pg_dump encerrado pelo sinal ${signal}. ${formatStderrDetail()}`,
+          ),
+        );
         return;
       }
 
       if (code !== 0) {
-        fail(new Error(`Processo pg_dump falhou com código ${code ?? 'desconhecido'}. ${formatStderrDetail()}`));
+        fail(
+          new Error(
+            `Processo pg_dump falhou com código ${code ?? "desconhecido"}. ${formatStderrDetail()}`,
+          ),
+        );
         return;
       }
 
       settled = true;
       cleanupAll();
-      console.log('✅ Processo pg_dump concluído com código 0.');
+      console.log("✅ Processo pg_dump concluído com código 0.");
       resolve();
     });
   });
