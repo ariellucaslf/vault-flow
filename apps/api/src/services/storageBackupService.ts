@@ -18,6 +18,7 @@ export interface StorageBackupResult {
   totalOriginalBytes: number;
   getCompressedBytes: () => number;
   donePromise: Promise<void>;
+  abort: (reason?: string) => void;
 }
 
 /**
@@ -97,11 +98,22 @@ export async function executeStorageBackup(source: StorageSourceInput): Promise<
   archive.pipe(passThrough);
 
   const totalOriginalBytes = files.reduce((acc, f) => acc + f.size, 0);
+  let aborted = false;
+
+  const abort = (reason = "Arquivamento de storage cancelado."): void => {
+    if (aborted) return;
+    aborted = true;
+    archive.abort();
+    archive.destroy(new Error(reason));
+    if (!passThrough.destroyed) {
+      passThrough.destroy(new Error(reason));
+    }
+  };
 
   // Executa o empacotamento assincronamente mantendo o stream ativo
   const donePromise = new Promise<void>((resolve, reject) => {
     archive.on("error", (err: Error) => {
-      console.error("❌ Erro no arquivamento de storage:", err);
+      console.error("❌ Erro no arquivamento de storage:", err.message);
       reject(err);
     });
 
@@ -115,6 +127,9 @@ export async function executeStorageBackup(source: StorageSourceInput): Promise<
           );
         } else {
           for (let i = 0; i < files.length; i++) {
+            if (aborted) {
+              throw new Error("Arquivamento interrompido por cancelamento.");
+            }
             const file = files[i];
             if (!file) continue;
             console.log("  [" + (i + 1) + "/" + files.length + "] Compactando: " + file.key + " (" + Math.round(file.size / 1024) + " KB)");
@@ -127,9 +142,10 @@ export async function executeStorageBackup(source: StorageSourceInput): Promise<
         console.log("✅ Arquivamento streaming do storage finalizado com sucesso.");
         resolve();
       } catch (err) {
-        console.error("❌ Falha durante a iteração de arquivos de storage:", err);
+        const msg = err instanceof Error ? err.message : "Erro desconhecido";
+        console.error("❌ Falha durante a iteração de arquivos de storage:", msg);
         archive.destroy();
-        reject(err);
+        reject(err instanceof Error ? err : new Error(msg));
       }
     })();
   });
@@ -140,5 +156,6 @@ export async function executeStorageBackup(source: StorageSourceInput): Promise<
     totalOriginalBytes,
     getCompressedBytes: () => (compressedBytes > 0 ? compressedBytes : archive.pointer()),
     donePromise,
+    abort,
   };
 }
