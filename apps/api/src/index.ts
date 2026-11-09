@@ -8,32 +8,55 @@ import dotenv from 'dotenv';
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 
-import express from 'express';
-import cors from 'cors';
+import express, { NextFunction, Request, Response } from 'express';
 import { prisma } from '@vault-flow/db';
+import { validateApiStartupEnv } from './config/env';
 import { initCronJobs } from './scheduler/cronManager';
+import appRoutes from './routes';
+import { sanitizeDiagnosticMessage } from './services/backupService';
+
+validateApiStartupEnv();
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+app.disable('x-powered-by');
+app.use(express.json({ limit: '64kb' }));
 
-import appRoutes from './routes';
 app.use('/api', appRoutes);
 
-app.get('/health', async (req, res) => {
+app.get('/health', async (_req: Request, res: Response) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
-    res.json({ status: 'ok', db: 'connected' });
+    res.json({
+      success: true,
+      data: { status: 'ok', db: 'connected' },
+      error: null,
+    });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Database connection check failed';
+    const message = error instanceof Error ? sanitizeDiagnosticMessage(error.message) : 'Database connection check failed';
     console.error('❌ Health check failed:', message);
-    res.status(500).json({ status: 'error', db: 'disconnected' });
+    res.status(500).json({
+      success: false,
+      data: { status: 'error', db: 'disconnected' },
+      error: 'Serviço de metadados indisponível.',
+    });
   }
 });
 
-const PORT = process.env.PORT || 4000;
+// Middleware global de proteção contra vazamento de erros internos ou JSON malformado
+app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  void _next;
+  const rawMessage = err instanceof Error ? err.message : 'Erro inesperado na requisição';
+  console.error('❌ Erro na camada HTTP da API:', sanitizeDiagnosticMessage(rawMessage));
+  res.status(400).json({
+    success: false,
+    data: null,
+    error: 'Requisição inválida ou erro interno no processamento.',
+  });
+});
+
+const PORT = Number(process.env.PORT) || 4000;
 
 app.listen(PORT, () => {
   console.log(`🚀 API Server ready at: http://localhost:${PORT}`);
-  initCronJobs();
+  void initCronJobs();
 });

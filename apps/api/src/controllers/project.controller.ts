@@ -1,72 +1,16 @@
 import { Request, Response } from 'express';
-import { prisma } from '@vault-flow/db';
 import { z } from 'zod';
 import {
   BackupBusyError,
-  getActiveBackupStatus,
   ProjectNotFoundError,
   startBackupForProject,
 } from '../services/backupOrchestrator';
-import { getScheduledJobsSnapshot, reconcileCronJobs } from '../scheduler/cronManager';
+import { reconcileCronJobs } from '../scheduler/cronManager';
+import { sanitizeDiagnosticMessage } from '../services/backupService';
 
 const triggerParamsSchema = z.object({
   id: z.string().uuid('O ID do projeto deve ser um UUID válido'),
 });
-
-export const listProjects = async (_req: Request, res: Response): Promise<void> => {
-  try {
-    const projects = await prisma.project.findMany({
-      select: {
-        id: true,
-        name: true,
-        type: true,
-        cronSchedule: true,
-        timezone: true,
-        enabled: true,
-        createdAt: true,
-        updatedAt: true,
-        storageSource: {
-          select: {
-            id: true,
-            type: true,
-            targetFolder: true,
-            prefix: true,
-          },
-        },
-        destinations: {
-          select: {
-            id: true,
-            type: true,
-            targetFolder: true,
-          },
-        },
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
-
-    res.json({
-      success: true,
-      data: {
-        projects,
-        runtime: {
-          ...getActiveBackupStatus(),
-          scheduledJobs: getScheduledJobsSnapshot(),
-        },
-      },
-      error: null,
-    });
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Erro interno ao listar projetos.';
-    console.error('❌ Erro ao listar projetos:', message);
-    res.status(500).json({
-      success: false,
-      data: null,
-      error: 'Erro interno ao consultar projetos.',
-    });
-  }
-};
 
 export const triggerBackup = async (req: Request, res: Response): Promise<void> => {
   const validation = triggerParamsSchema.safeParse(req.params);
@@ -87,7 +31,7 @@ export const triggerBackup = async (req: Request, res: Response): Promise<void> 
 
     // Acompanha a promise em background para evitar UnhandledPromiseRejection
     accepted.completionPromise.catch((err: unknown) => {
-      const msg = err instanceof Error ? err.message : 'Erro desconhecido';
+      const msg = err instanceof Error ? sanitizeDiagnosticMessage(err.message) : 'Erro desconhecido';
       console.error(`❌ Execução em background [${accepted.logId}] falhou para ${id}: ${msg}`);
     });
 
@@ -120,7 +64,7 @@ export const triggerBackup = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const message = error instanceof Error ? error.message : 'Erro interno ao disparar backup.';
+    const message = error instanceof Error ? sanitizeDiagnosticMessage(error.message) : 'Erro interno ao disparar backup.';
     console.error('❌ Erro ao aceitar disparo de backup:', message);
     res.status(500).json({
       success: false,
@@ -139,7 +83,7 @@ export const reconcileProjectsCron = async (_req: Request, res: Response): Promi
       error: null,
     });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Erro desconhecido na reconciliação.';
+    const message = error instanceof Error ? sanitizeDiagnosticMessage(error.message) : 'Erro desconhecido na reconciliação.';
     console.error('❌ Erro ao reconciliar agendamentos cron:', message);
     res.status(500).json({
       success: false,
