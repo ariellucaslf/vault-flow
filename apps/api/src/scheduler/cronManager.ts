@@ -1,10 +1,11 @@
-import cron, { ScheduledTask } from 'node-cron';
-import { prisma } from '@vault-flow/db';
+import cron, { ScheduledTask } from "node-cron";
+import { prisma } from "@vault-flow/db";
 import {
   BackupBusyError,
   reconcileInterruptedBackups,
   runBackupForProject,
-} from '../services/backupOrchestrator';
+} from "../services/backupOrchestrator";
+import { sanitizeDiagnosticMessage } from "../services/backupService";
 
 interface RegisteredCronJob {
   task: ScheduledTask;
@@ -14,9 +15,18 @@ interface RegisteredCronJob {
 }
 
 const scheduledJobs = new Map<string, RegisteredCronJob>();
+let inFlight: Promise<CronReconciliationResult> | undefined;
+let recoveryComplete = false;
+let ready = false;
+let stopping = false;
+let refreshTimer: NodeJS.Timeout | undefined;
+
+export function isSchedulerReady(): boolean {
+  return ready && !stopping;
+}
 
 export function isValidTimeZone(tz: string): boolean {
-  if (!tz || typeof tz !== 'string') return false;
+  if (!tz || typeof tz !== "string") return false;
   try {
     Intl.DateTimeFormat(undefined, { timeZone: tz.trim() });
     return true;
@@ -26,7 +36,7 @@ export function isValidTimeZone(tz: string): boolean {
 }
 
 export function isValidCronExpression(expression: string): boolean {
-  if (!expression || typeof expression !== 'string') return false;
+  if (!expression || typeof expression !== "string") return false;
   const trimmed = expression.trim();
   // Exige padrão cron de 5 campos (minuto hora dia-do-mês mês dia-da-semana)
   const fields = trimmed.split(/\s+/);
@@ -35,14 +45,14 @@ export function isValidCronExpression(expression: string): boolean {
 }
 
 export function resolveSafeTimeZone(candidate?: string | null): string {
-  const defaultTz = process.env.CRON_TIMEZONE?.trim() || 'UTC';
+  const defaultTz = process.env.CRON_TIMEZONE?.trim() || "UTC";
   if (candidate && isValidTimeZone(candidate)) {
     return candidate.trim();
   }
   if (isValidTimeZone(defaultTz)) {
     return defaultTz;
   }
-  return 'UTC';
+  return "UTC";
 }
 
 export interface CronReconciliationResult {
@@ -56,7 +66,30 @@ export interface CronReconciliationResult {
  * Reconcilia em memória os agendamentos ativos com o estado atual do banco de dados,
  * sem necessidade de reiniciar o servidor da API.
  */
-export async function reconcileCronJobs(): Promise<CronReconciliationResult> {
+export function reconcileCronJobs(): Promise<CronReconciliationResult> {
+  if (stopping) return Promise.reject(new Error("Agendador em encerramento."));
+  if (inFlight) return inFlight;
+  inFlight = (async () => {
+    // Uma única vez e antes de permitir novos disparos, mesmo após falha inicial.
+    if (!recoveryComplete) {
+      await reconcileInterruptedBackups();
+      recoveryComplete = true;
+    }
+    const summary = await reconcileRegisteredJobs();
+    if (!stopping) ready = true;
+    return summary;
+  })()
+    .catch((error: unknown) => {
+      ready = false;
+      throw error;
+    })
+    .finally(() => {
+      inFlight = undefined;
+    });
+  return inFlight;
+}
+
+async function reconcileRegisteredJobs(): Promise<CronReconciliationResult> {
   const projects = await prisma.project.findMany({
     select: {
       id: true,
@@ -68,8 +101,9 @@ export async function reconcileCronJobs(): Promise<CronReconciliationResult> {
     },
   });
 
+  if (stopping) return { activeJobs: 0, added: 0, updated: 0, removed: 0 };
   const activeProjectsById = new Map(
-    projects.filter((p) => p.enabled).map((p) => [p.id, p])
+    projects.filter((p) => p.enabled).map((p) => [p.id, p]),
   );
 
   let added = 0;
@@ -82,7 +116,9 @@ export async function reconcileCronJobs(): Promise<CronReconciliationResult> {
       existing.task.stop();
       scheduledJobs.delete(projectId);
       removed++;
-      console.log(`🛑 Agendamento removido/pausado para o projeto: [${existing.projectName}]`);
+      console.log(
+        `🛑 Agendamento removido/pausado para o projeto: [${existing.projectName}]`,
+      );
     }
   }
 
@@ -91,7 +127,7 @@ export async function reconcileCronJobs(): Promise<CronReconciliationResult> {
     const schedule = project.cronSchedule.trim();
     if (!isValidCronExpression(schedule)) {
       console.error(
-        `❌ Expressão cron inválida ignorada para o projeto "${project.name}": "${project.cronSchedule}"`
+        `❌ Expressão cron inválida ignorada para o projeto "${project.name}": "${project.cronSchedule}"`,
       );
       const prev = scheduledJobs.get(project.id);
       if (prev) {
@@ -122,31 +158,33 @@ export async function reconcileCronJobs(): Promise<CronReconciliationResult> {
       added++;
     }
 
-    const typeLabel = project.type === 'STORAGE' ? 'STORAGE' : 'DATABASE';
+    const typeLabel = project.type === "STORAGE" ? "STORAGE" : "DATABASE";
     console.log(
-      `🕒 Agendando backup [${typeLabel}] para [${project.name}] com cron "${schedule}" (${timezone})`
+      `🕒 Agendando backup [${typeLabel}] para [${project.name}] com cron "${schedule}" (${timezone})`,
     );
 
     const task = cron.schedule(
       schedule,
       async () => {
         try {
-          await runBackupForProject(project.id, 'SCHEDULED');
+          await runBackupForProject(project.id, "SCHEDULED");
         } catch (err: unknown) {
           if (err instanceof BackupBusyError) {
             console.warn(
-              `⚠️ Execução agendada ignorada para "${project.name}" (ocupado): ${err.message}`
+              `⚠️ Execução agendada ignorada para "${project.name}" (ocupado): ${err.message}`,
             );
             return;
           }
-          const msg = err instanceof Error ? err.message : 'Erro desconhecido';
-          console.error(`❌ Erro na execução agendada do projeto "${project.name}": ${msg}`);
+          const msg = err instanceof Error ? err.message : "Erro desconhecido";
+          console.error(
+            `❌ Erro na execução agendada do projeto "${project.name}": ${msg}`,
+          );
         }
       },
       {
         scheduled: true,
         timezone,
-      }
+      },
     );
 
     scheduledJobs.set(project.id, {
@@ -179,17 +217,53 @@ export function getScheduledJobsSnapshot(): Array<{
   }));
 }
 
-export async function initCronJobs(): Promise<void> {
-  console.log('🔄 Inicializando reconciliação de execuções e agendamentos (Cron)...');
-
-  try {
-    await reconcileInterruptedBackups();
-    const summary = await reconcileCronJobs();
-    console.log(
-      `✅ Cron reconciliado: ${summary.activeJobs} ativo(s) (+${summary.added} adicionado(s), ~${summary.updated} atualizado(s), -${summary.removed} removido(s)).`
-    );
-  } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : 'Erro desconhecido';
-    console.error('❌ Falha ao inicializar rotinas agendadas (Cron):', msg);
+export async function initCronJobs(options?: {
+  intervalMs?: number;
+}): Promise<void> {
+  stopping = false;
+  const intervalMs =
+    options?.intervalMs ??
+    Number(process.env.CRON_RECONCILE_INTERVAL_MS || 60_000);
+  const refresh = async (): Promise<void> => {
+    try {
+      await reconcileCronJobs();
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error
+          ? sanitizeDiagnosticMessage(error.message)
+          : "Erro desconhecido";
+      console.error(
+        "❌ Falha na reconciliação do cron; nova tentativa automática:",
+        message,
+      );
+    }
+  };
+  // Instala o retry antes da primeira tentativa, que pode falhar por indisponibilidade do banco.
+  if (!refreshTimer) {
+    refreshTimer = setInterval(() => {
+      void refresh();
+    }, intervalMs);
+    refreshTimer.unref();
   }
+  await refresh();
+}
+
+export async function stopCronJobs(): Promise<void> {
+  stopping = true;
+  ready = false;
+  if (refreshTimer) clearInterval(refreshTimer);
+  refreshTimer = undefined;
+  if (inFlight) {
+    try {
+      await inFlight;
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error
+          ? sanitizeDiagnosticMessage(error.message)
+          : "Erro desconhecido";
+      console.warn("⚠️ Reconciliação encerrada com falha:", message);
+    }
+  }
+  for (const job of scheduledJobs.values()) job.task.stop();
+  scheduledJobs.clear();
 }
