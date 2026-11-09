@@ -2,7 +2,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "../../lib/auth";
 import { redirect } from "next/navigation";
 import { prisma } from "@vault-flow/db";
-import { Database, HardDrive, Clock, Activity, CheckCircle2, XCircle } from "lucide-react";
+import { Database, HardDrive, Clock, Activity, CheckCircle2, XCircle, AlertTriangle } from "lucide-react";
 import { formatBytes } from "../../lib/utils";
 
 export default async function Dashboard() {
@@ -17,7 +17,15 @@ export default async function Dashboard() {
     prisma.backupLog.findMany({
       take: 6,
       orderBy: { executedAt: "desc" },
-      include: { project: true },
+      include: {
+        project: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+          },
+        },
+      },
     }),
   ]);
 
@@ -127,6 +135,11 @@ export default async function Dashboard() {
                       <span className="px-3 py-1 bg-red-500/10 text-red-400 border border-red-500/20 rounded-full text-xs font-medium flex items-center gap-1.5">
                         <XCircle className="w-3.5 h-3.5" />
                         Falha
+                      </span>
+                    ) : log.status === "SKIPPED_BUSY" ? (
+                      <span className="px-3 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-full text-xs font-medium flex items-center gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5" />
+                        Ocupado
                       </span>
                     ) : (
                       <span className="px-3 py-1 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-full text-xs font-medium flex items-center gap-1.5">
