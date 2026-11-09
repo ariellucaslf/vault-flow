@@ -42,6 +42,12 @@
     "DIRECT_URL",
     "PORT",
     "ADMIN_USERNAME",
-    "ADMIN_PASSWORD"
+    "ADMIN_PASSWORD",
+    "BACKUP_TIMEOUT_MS",
+    "MAX_CONCURRENT_BACKUPS",
+    "CRON_TIMEZONE"
+  ],
+  "globalPassThroughEnv": [
+    "PATH"
   ]
 }
