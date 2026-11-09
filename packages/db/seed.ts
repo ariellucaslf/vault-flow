@@ -1,5 +1,14 @@
+import path from 'path';
+import dotenv from 'dotenv';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+
+// Carrega variáveis de ambiente de forma previsível sem sobrescrever variáveis já definidas no processo:
+// 1. process.env já injetado (ex: Docker Compose / CI / linha de comando)
+// 2. packages/db/.env (se existir)
+// 3. .env na raiz do monorepo (se existir)
+dotenv.config({ path: path.resolve(__dirname, '.env') });
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 const prisma = new PrismaClient();
 
