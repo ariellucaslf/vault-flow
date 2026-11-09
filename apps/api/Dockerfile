@@ -1,28 +1,28 @@
-# Base Alpine super leve
-FROM node:20-alpine AS builder
+# Base Alpine LTS alinhada com @types/node e engines do monorepo
+FROM node:22-alpine AS builder
 RUN apk update && apk add --no-cache libc6-compat
 WORKDIR /app
-RUN npm install -g turbo
+RUN npm install -g npm@11.13.0 turbo@2.10.8
 # Copia todo o monorepo
 COPY . .
 # Extrai apenas as dependências do apps/api e pacotes locais que ele usa (@vault-flow/db)
 RUN turbo prune --scope=@vault-flow/api --docker
 
-FROM node:20-alpine AS installer
-RUN apk update && apk add --no-cache libc6-compat
+FROM node:22-alpine AS installer
+RUN apk update && apk add --no-cache libc6-compat && npm install -g npm@11.13.0
 WORKDIR /app
 COPY .gitignore .gitignore
 COPY --from=builder /app/out/json/ .
 COPY --from=builder /app/out/package-lock.json ./package-lock.json
-# Instala as dependências de produção
-RUN npm install
+# Instala as dependências pelo lockfile determinístico
+RUN npm ci
 COPY --from=builder /app/out/full/ .
 # Gera os arquivos do Prisma no node_modules
 RUN npm run generate -w @vault-flow/db
 # Faz o build via Turborepo
 RUN npx turbo run build --filter=@vault-flow/api
 
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 
 # ==============================================================================
 # IMPORTANTE: O SEGREDO ESTÁ AQUI

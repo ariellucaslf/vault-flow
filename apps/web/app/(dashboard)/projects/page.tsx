@@ -1,14 +1,33 @@
 import { prisma } from "@vault-flow/db";
 import Link from "next/link";
-import { Plus, Database, HardDrive, Clock, Cloud, Trash2, Play } from "lucide-react";
-import { deleteProject } from "../../actions/project.actions";
+import { Plus, Database, HardDrive, Clock, Cloud } from "lucide-react";
 import cronstrue from "cronstrue/i18n";
+import { ProjectRowActions } from "./project-row-actions";
 
 export default async function ProjectsPage() {
   const projects = await prisma.project.findMany({
-    include: {
-      destinations: true,
-      storageSource: true,
+    select: {
+      id: true,
+      name: true,
+      type: true,
+      cronSchedule: true,
+      timezone: true,
+      enabled: true,
+      createdAt: true,
+      storageSource: {
+        select: {
+          id: true,
+          type: true,
+          targetFolder: true,
+        },
+      },
+      destinations: {
+        select: {
+          id: true,
+          type: true,
+          targetFolder: true,
+        },
+      },
     },
     orderBy: { createdAt: "desc" },
   });
@@ -18,10 +37,12 @@ export default async function ProjectsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-white tracking-tight">Projetos de Backup</h1>
-          <p className="text-neutral-400 mt-1">Gerencie as conexões de banco de dados e rotinas de backup de storages.</p>
+          <p className="text-neutral-400 mt-1">
+            Gerencie as conexões de banco de dados, rotinas agendadas e destinos de armazenamento.
+          </p>
         </div>
-        <Link 
-          href="/projects/new" 
+        <Link
+          href="/projects/new"
           className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors flex items-center gap-2 shadow-lg shadow-blue-900/20"
         >
           <Plus className="w-4 h-4" />
@@ -56,19 +77,32 @@ export default async function ProjectsPage() {
                     <tr key={project.id} className="hover:bg-neutral-800/50 transition-colors">
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
-                          <div className={`p-2 rounded-lg border ${
-                            isStorage
-                              ? "bg-purple-500/10 border-purple-500/20 text-purple-400"
-                              : "bg-blue-500/10 border-blue-500/20 text-blue-400"
-                          }`}>
-                            {isStorage ? <HardDrive className="w-4 h-4" /> : <Database className="w-4 h-4" />}
+                          <div
+                            className={`p-2 rounded-lg border ${
+                              isStorage
+                                ? "bg-purple-500/10 border-purple-500/20 text-purple-400"
+                                : "bg-blue-500/10 border-blue-500/20 text-blue-400"
+                            }`}
+                          >
+                            {isStorage ? (
+                              <HardDrive className="w-4 h-4" />
+                            ) : (
+                              <Database className="w-4 h-4" />
+                            )}
                           </div>
                           <div>
-                            <span className="font-semibold text-white block">{project.name}</span>
-                            <span className="text-xs text-neutral-500 font-mono">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-white">{project.name}</span>
+                              {!project.enabled && (
+                                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                  Pausado
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-xs text-neutral-500 font-mono block">
                               {isStorage
                                 ? `origem: ${project.storageSource?.targetFolder || "Storage"}`
-                                : "PostgreSQL"}
+                                : "PostgreSQL (.dump)"}
                             </span>
                           </div>
                         </div>
@@ -85,61 +119,52 @@ export default async function ProjectsPage() {
                         )}
                       </td>
                       <td className="px-6 py-4">
-                        <div className="flex items-center gap-2" title={project.cronSchedule}>
-                          <Clock className="w-4 h-4 text-neutral-500" />
-                          <span className="bg-neutral-950 border border-neutral-800 px-2 py-1 rounded text-neutral-300 text-xs font-medium">
-                            {(() => {
-                              try {
-                                let translated = cronstrue.toString(project.cronSchedule, { locale: "pt_BR", use24HourTimeFormat: true, verbose: true });
-                                if (translated.startsWith("Às") || translated.startsWith("As")) {
-                                  translated = "Todo dia " + translated.toLowerCase();
+                        <div className="flex flex-col gap-1" title={`${project.cronSchedule} (${project.timezone})`}>
+                          <div className="flex items-center gap-2">
+                            <Clock className="w-4 h-4 text-neutral-500 shrink-0" />
+                            <span className="bg-neutral-950 border border-neutral-800 px-2 py-1 rounded text-neutral-300 text-xs font-medium">
+                              {(() => {
+                                try {
+                                  let translated = cronstrue.toString(project.cronSchedule, {
+                                    locale: "pt_BR",
+                                    use24HourTimeFormat: true,
+                                    verbose: true,
+                                  });
+                                  if (translated.startsWith("Às") || translated.startsWith("As")) {
+                                    translated = "Todo dia " + translated.toLowerCase();
+                                  }
+                                  return translated.charAt(0).toUpperCase() + translated.slice(1);
+                                } catch {
+                                  return project.cronSchedule;
                                 }
-                                return translated.charAt(0).toUpperCase() + translated.slice(1);
-                              } catch {
-                                return project.cronSchedule;
-                              }
-                            })()}
+                              })()}
+                            </span>
+                          </div>
+                          <span className="text-[11px] text-neutral-500 font-mono pl-6">
+                            {project.cronSchedule} • {project.timezone}
                           </span>
                         </div>
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex flex-wrap items-center gap-1.5">
                           {project.destinations.map((d) => (
-                            <span key={d.id} className="text-xs border border-purple-500/30 text-purple-400 px-2 py-0.5 rounded-full bg-purple-500/10 flex items-center gap-1">
+                            <span
+                              key={d.id}
+                              title={`Alvo: ${d.targetFolder}`}
+                              className="text-xs border border-purple-500/30 text-purple-400 px-2 py-0.5 rounded-full bg-purple-500/10 flex items-center gap-1"
+                            >
                               <Cloud className="w-3 h-3" />
-                              {d.type === "AWS_S3" ? "AWS S3" : "Google Drive"}
+                              {d.type === "AWS_S3" ? `S3 (${d.targetFolder})` : `Drive (${d.targetFolder})`}
                             </span>
                           ))}
                         </div>
                       </td>
                       <td className="px-6 py-4 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <form action={async () => {
-                            "use server";
-                            const { triggerBackupAction } = await import("../../actions/project.actions");
-                            await triggerBackupAction(project.id);
-                          }}>
-                            <button 
-                              type="submit" 
-                              title="Executar Agora (Forçar Backup Imediato)" 
-                              className="p-2 text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-colors"
-                            >
-                              <Play className="w-4 h-4" />
-                            </button>
-                          </form>
-                          <form action={async () => {
-                            "use server";
-                            await deleteProject(project.id);
-                          }}>
-                            <button 
-                              type="submit" 
-                              title="Excluir Projeto" 
-                              className="p-2 text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </form>
-                        </div>
+                        <ProjectRowActions
+                          projectId={project.id}
+                          projectName={project.name}
+                          enabled={project.enabled}
+                        />
                       </td>
                     </tr>
                   );

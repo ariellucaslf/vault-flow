@@ -1,0 +1,9 @@
+-- AlterTable
+ALTER TABLE "Project" ADD COLUMN "timezone" TEXT NOT NULL DEFAULT 'UTC',
+ADD COLUMN "enabled" BOOLEAN NOT NULL DEFAULT true;
+
+-- AlterTable
+ALTER TABLE "BackupLog" ADD COLUMN "triggerType" TEXT NOT NULL DEFAULT 'MANUAL',
+ADD COLUMN "artifactKey" TEXT,
+ADD COLUMN "checksumSha256" TEXT,
+ADD COLUMN "completedAt" TIMESTAMP(3);

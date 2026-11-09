@@ -3,29 +3,19 @@
   "ui": "tui",
   "tasks": {
     "build": {
-      "dependsOn": [
-        "^build"
-      ],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        ".env*"
-      ],
-      "outputs": [
-        ".next/**",
-        "!.next/cache/**",
-        "!.next/dev/**",
-        "dist/**"
-      ]
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", ".env*"],
+      "outputs": [".next/**", "!.next/cache/**", "!.next/dev/**", "dist/**"]
     },
     "lint": {
-      "dependsOn": [
-        "^lint"
-      ]
+      "dependsOn": ["^lint"]
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "cache": false
     },
     "check-types": {
-      "dependsOn": [
-        "^check-types"
-      ]
+      "dependsOn": ["@vault-flow/db#build", "^check-types"]
     },
     "dev": {
       "cache": false,
@@ -33,11 +23,24 @@
     }
   },
   "globalEnv": [
+    "NODE_ENV",
     "API_URL",
     "NEXTAUTH_SECRET",
     "NEXTAUTH_URL",
     "DATABASE_URL",
     "DIRECT_URL",
-    "PORT"
-  ]
+    "PORT",
+    "ADMIN_USERNAME",
+    "ADMIN_PASSWORD",
+    "ADMIN_FORCE_RESET",
+    "INTERNAL_API_TOKEN",
+    "VAULTFLOW_MASTER_KEY_FILE",
+    "VAULTFLOW_MASTER_KEY",
+    "ALLOWED_LOCAL_BACKUP_ROOTS",
+    "BACKUP_TIMEOUT_MS",
+    "MAX_CONCURRENT_BACKUPS",
+    "CRON_TIMEZONE",
+    "CRON_RECONCILE_INTERVAL_MS"
+  ],
+  "globalPassThroughEnv": ["PATH"]
 }

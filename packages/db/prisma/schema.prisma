@@ -12,8 +12,11 @@ model Project {
   id              String         @id @default(uuid())
   name            String         // Nome de identificação (ex: "App SaaS Delivery")
   type            String         @default("DATABASE") // "DATABASE" | "STORAGE"
-  dbUrl           String?        // Connection string (protegida) - opcional para projetos de storage
+  dbUrl           String?        // Connection string cifrada (AES-256-GCM vf:v1) - opcional para projetos de storage
+  secretVersion   Int            @default(0) // 0 = legado/sem cifra, 1 = envelope cifrado vf:v1
   cronSchedule    String         // Padrão Cron (ex: "0 3 * * 1")
+  timezone        String         @default("UTC") // Timezone IANA validado para o agendamento cron
+  enabled         Boolean        @default(true)  // Permite pausar/reativar agendamentos sem remover o projeto
   storageSource   StorageSource?
   destinations    Destination[] 
   logs            BackupLog[]
@@ -24,7 +27,8 @@ model Project {
 model StorageSource {
   id              String   @id @default(uuid())
   type            String   // "AWS_S3" | "S3_COMPATIBLE" | "GOOGLE_DRIVE" | "LOCAL_PATH"
-  credentials     String   // Chaves de API encriptadas ou JSON de configuração
+  credentials     String   // Credenciais JSON cifradas (AES-256-GCM vf:v1)
+  secretVersion   Int      @default(0) // 0 = legado, 1 = envelope cifrado vf:v1
   targetFolder    String   // Nome do bucket AWS, ID da pasta GDrive ou caminho local
   prefix          String?  // Subdiretório ou prefixo opcional para filtrar arquivos
   projectId       String   @unique
@@ -34,21 +38,26 @@ model StorageSource {
 model Destination {
   id              String   @id @default(uuid())
   type            String   // Enum adaptado: "AWS_S3" | "GOOGLE_DRIVE" | "LOCAL_PATH"
-  credentials     String   // Chaves de API encriptadas na aplicação (armazenado como string criptografada)
+  credentials     String   // Credenciais JSON cifradas (AES-256-GCM vf:v1)
+  secretVersion   Int      @default(0) // 0 = legado, 1 = envelope cifrado vf:v1
   targetFolder    String   // Nome do bucket AWS ou ID da pasta no GDrive
   projectId       String
   project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
 
 model BackupLog {
-  id              String   @id @default(uuid())
-  status          String   // Enum adaptado: "SUCCESS" | "FAILED" | "IN_PROGRESS"
+  id              String    @id @default(uuid())
+  status          String    // "SUCCESS" | "FAILED" | "IN_PROGRESS" | "SKIPPED_BUSY"
+  triggerType     String    @default("MANUAL") // "MANUAL" | "SCHEDULED"
   errorMessage    String?
-  fileSize        BigInt?  // Tamanho do backup gerado (em bytes, BigInt para suportar dezenas/centenas de GBs)
-  fileCount       Int?     // Quantidade de arquivos processados no snapshot
-  executedAt      DateTime @default(now())
+  fileSize        BigInt?   // Tamanho do backup gerado (em bytes, BigInt para suportar dezenas/centenas de GBs)
+  fileCount       Int?      // Quantidade de arquivos processados no snapshot
+  artifactKey     String?   // Identificação do objeto remoto gerado (ex: s3://bucket/key)
+  checksumSha256  String?   // Hash SHA-256 calculado em streaming para verificação de integridade
+  executedAt      DateTime  @default(now())
+  completedAt     DateTime?
   projectId       String
-  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project         Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
 
 model User {

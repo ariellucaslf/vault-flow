@@ -1,4 +1,9 @@
-import { S3Client, ListObjectsV2Command, ListObjectsV2CommandOutput, GetObjectCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  ListObjectsV2Command,
+  ListObjectsV2CommandOutput,
+  GetObjectCommand,
+} from "@aws-sdk/client-s3";
 import { Readable } from "stream";
 import { IStorageProvider, StorageFileItem } from "./storageProvider.interface";
 
@@ -28,18 +33,32 @@ export class S3StorageProvider implements IStorageProvider {
     });
   }
 
-  async listFiles(prefix?: string): Promise<StorageFileItem[]> {
+  dispose(): void {
+    this.client.destroy();
+  }
+
+  async listFiles(
+    prefix?: string,
+    signal?: AbortSignal,
+  ): Promise<StorageFileItem[]> {
     const items: StorageFileItem[] = [];
     let continuationToken: string | undefined = undefined;
 
     do {
       const command = new ListObjectsV2Command({
         Bucket: this.bucket,
-        Prefix: prefix ? (prefix.startsWith("/") ? prefix.slice(1) : prefix) : undefined,
+        Prefix: prefix
+          ? prefix.startsWith("/")
+            ? prefix.slice(1)
+            : prefix
+          : undefined,
         ContinuationToken: continuationToken,
       });
 
-      const response: ListObjectsV2CommandOutput = await this.client.send(command);
+      const response: ListObjectsV2CommandOutput = await this.client.send(
+        command,
+        { abortSignal: signal },
+      );
 
       if (response.Contents) {
         for (const object of response.Contents) {
@@ -59,18 +78,33 @@ export class S3StorageProvider implements IStorageProvider {
     return items;
   }
 
-  async getFileStream(item: StorageFileItem): Promise<Readable> {
+  async getFileStream(
+    item: StorageFileItem,
+    signal?: AbortSignal,
+  ): Promise<Readable> {
     const command = new GetObjectCommand({
       Bucket: this.bucket,
       Key: item.key,
     });
 
-    const response = await this.client.send(command);
+    const response = await this.client.send(command, { abortSignal: signal });
 
     if (!response.Body) {
-      throw new Error("Corpo vazio recebido ao baixar o arquivo S3: " + item.key);
+      throw new Error(
+        "Corpo vazio recebido ao baixar o arquivo S3: " + item.key,
+      );
     }
 
-    return response.Body as Readable;
+    const body = response.Body as Readable;
+    const onAbort = (): void => {
+      body.destroy();
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    body.once("close", () => signal?.removeEventListener("abort", onAbort));
+    if (signal?.aborted) {
+      body.destroy();
+      signal.throwIfAborted();
+    }
+    return body;
   }
 }

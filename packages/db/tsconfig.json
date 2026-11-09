@@ -2,12 +2,13 @@
   "compilerOptions": {
     "target": "es2022",
     "module": "commonjs",
+    "declaration": true,
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "outDir": "dist"
   },
-  "include": ["."],
+  "include": ["index.ts", "crypto.ts", "seed.ts", "migrate-secrets.ts"],
   "exclude": ["node_modules", "dist"]
 }

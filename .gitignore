@@ -36,6 +36,10 @@ yarn-error.log*
 # Misc
 .DS_Store
 *.pem
+.secrets/
 
 # Plan Implementation
 plan_implementation.md
+
+# Local architecture and implementation plans
+/docs/

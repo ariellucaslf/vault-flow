@@ -12,7 +12,10 @@ export class GoogleDriveStorageProvider implements IStorageProvider {
   private credentialsJson: string;
 
   constructor(config: GoogleDriveProviderConfig) {
-    this.folderId = config.folderId;
+    if (!/^[A-Za-z0-9_-]+$/.test(config.folderId.trim())) {
+      throw new Error("ID de pasta Google Drive inválido.");
+    }
+    this.folderId = config.folderId.trim();
     this.credentialsJson = config.credentialsJson;
   }
 
@@ -32,35 +35,56 @@ export class GoogleDriveStorageProvider implements IStorageProvider {
     return google.drive({ version: "v3", auth });
   }
 
-  async listFiles(prefix?: string): Promise<StorageFileItem[]> {
+  async listFiles(
+    prefix?: string,
+    signal?: AbortSignal,
+  ): Promise<StorageFileItem[]> {
     const drive = this.getDriveClient();
     const items: StorageFileItem[] = [];
 
     // Funcao recursiva para listar pastas e arquivos mantendo a hierarquia relativa
-    const listFolderRecursive = async (currentFolderId: string, currentPath: string): Promise<void> => {
+    const listFolderRecursive = async (
+      currentFolderId: string,
+      currentPath: string,
+    ): Promise<void> => {
       let pageToken: string | undefined = undefined;
 
       do {
-        const res: { data: drive_v3.Schema$FileList } = await drive.files.list({
-          q: " + currentFolderId +  in parents and trashed = false",
-          fields: "nextPageToken, files(id, name, mimeType, size, modifiedTime)",
-          pageToken: pageToken,
-          pageSize: 100,
-        });
+        const res: { data: drive_v3.Schema$FileList } = await drive.files.list(
+          {
+            q: "'" + currentFolderId + "' in parents and trashed = false",
+            fields:
+              "nextPageToken, files(id, name, mimeType, size, modifiedTime)",
+            pageToken: pageToken,
+            pageSize: 100,
+          },
+          signal ? { signal } : undefined,
+        );
 
         const files = res.data.files || [];
         for (const file of files) {
           if (!file.id || !file.name) continue;
 
           if (file.mimeType === "application/vnd.google-apps.folder") {
-            const nextPath = currentPath ? currentPath + "/" + file.name : file.name;
+            const nextPath = currentPath
+              ? currentPath + "/" + file.name
+              : file.name;
             await listFolderRecursive(file.id, nextPath);
           } else {
-            const relativePath = currentPath ? currentPath + "/" + file.name : file.name;
+            if (file.mimeType?.startsWith("application/vnd.google-apps.")) {
+              throw new Error(
+                "Arquivos nativos/atalhos do Google Drive exigem exportação ainda não suportada.",
+              );
+            }
+            const relativePath = currentPath
+              ? currentPath + "/" + file.name
+              : file.name;
             items.push({
               key: relativePath,
               size: file.size ? Number(file.size) : 0,
-              lastModified: file.modifiedTime ? new Date(file.modifiedTime) : undefined,
+              lastModified: file.modifiedTime
+                ? new Date(file.modifiedTime)
+                : undefined,
               id: file.id,
             });
           }
@@ -70,21 +94,41 @@ export class GoogleDriveStorageProvider implements IStorageProvider {
       } while (pageToken);
     };
 
-    await listFolderRecursive(this.folderId, prefix ? prefix.replace(/^\/+|\/+$/g, "") : "");
+    if (prefix?.trim()) {
+      throw new Error(
+        "Prefixo de origem Google Drive ainda não suportado. Use uma pasta de origem específica.",
+      );
+    }
+    await listFolderRecursive(this.folderId, "");
     return items;
   }
 
-  async getFileStream(item: StorageFileItem): Promise<Readable> {
+  async getFileStream(
+    item: StorageFileItem,
+    signal?: AbortSignal,
+  ): Promise<Readable> {
     if (!item.id) {
-      throw new Error("ID do Google Drive não encontrado para o arquivo: " + item.key);
+      throw new Error(
+        "ID do Google Drive não encontrado para o arquivo: " + item.key,
+      );
     }
 
     const drive = this.getDriveClient();
     const response = await drive.files.get(
       { fileId: item.id, alt: "media" },
-      { responseType: "stream" }
+      { responseType: "stream", signal },
     );
 
-    return response.data as Readable;
+    const stream = response.data as Readable;
+    const onAbort = (): void => {
+      stream.destroy();
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    stream.once("close", () => signal?.removeEventListener("abort", onAbort));
+    if (signal?.aborted) {
+      stream.destroy();
+      signal.throwIfAborted();
+    }
+    return stream;
   }
 }
