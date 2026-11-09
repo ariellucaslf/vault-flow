@@ -1,148 +1,120 @@
-<p align="center">
-  <br>
-  <h1 align="center">VaultFlow </h1>
-  <p align="center">
-    <strong>Automação Inteligente de Backups para Bancos de Dados & Storages em Nuvem</strong>
-  </p>
-  <p align="center">
-    <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
-  </p>
-</p>
+# VaultFlow
 
-O **VaultFlow** é uma solução open-source projetada para desenvolvedores e equipes que precisam automatizar o processo de backup de bancos de dados (PostgreSQL) e storages (AWS S3, MinIO, Google Drive, Volumes) e enviá-los de forma segura para provedores de nuvem de maneira programada e assíncrona.
+Ferramenta open-source de backups PostgreSQL e storage para instalação individual. Cada operador hospeda sua própria cópia e utiliza suas próprias credenciais e destinos. Não existe cadastro público, isolamento entre clientes ou um serviço de backups hospedado pelo mantenedor.
 
-Ao invés de criar dezenas de scripts Bash soltos em servidores diferentes, o VaultFlow oferece um Painel de Controle (Dashboard) moderno e unificado.
+## Arquitetura e escopo
 
-## Tecnologias Principais
+- `apps/web`: painel Next.js, NextAuth e Server Actions autenticadas.
+- `apps/api`: API Express privada, cron reconciliado e motor de backup em streaming.
+- `packages/db`: Prisma/PostgreSQL de metadados e cifragem local das configurações.
+- `apps/docs`: página introdutória; as instruções operacionais atuais estão neste README.
 
-- **Frontend (Painel)**: Next.js (App Router), Tailwind CSS v4, Lucide Icons, NextAuth.
-- **Backend (Motor de Backup)**: Node.js (TypeScript), Express, `pg_dump`, `node-cron`, AWS S3 SDK, Google Drive API.
-- **Banco de Dados (Metadados)**: PostgreSQL com Prisma ORM.
-- **Arquitetura**: Monorepo gerenciado com Turborepo.
-
-## Funcionalidades
-
-- **Painel Protegido**: Autenticação segura via banco de dados (Bcrypt + NextAuth).
-- **Múltiplos Projetos**: Cadastre bancos PostgreSQL e Storages (S3, MinIO, Google Drive).
-- **Histórico de Logs**: Acompanhe o sucesso ou falha de cada backup gerado diretamente no painel.
-- **Agendamento Cron Avançado**: Defina de hora em hora, diariamente ou semanalmente. Suporte visual em tempo real para a tradução do Cron.
-- **Gatilho Manual**: Force o backup de um projeto instantaneamente via UI (Server-to-Server trigger seguro).
-- **Múltiplos Destinos na Nuvem**: 
-  - **AWS S3 / S3-Compatible** (Via Multipart Upload).
-  - **Google Drive** (Via Service Accounts e `googleapis`).
-- **Upload via Streaming**: O backup nunca toca o disco rígido do servidor Node.js. Tanto o `pg_dump` quanto os snapshots de storage são canalizados (Piped) diretamente para a nuvem em formato compactado, permitindo o backup de dados gigantescos (Gigabytes) usando pouquíssima memória RAM.
-
----
-
-## Pré-requisitos
-
-Antes de iniciar, certifique-se de ter instalado em sua máquina ou servidor:
-
-1. **Node.js** (v20 ou superior).
-2. **PostgreSQL Client** (`pg_dump` precisa estar instalado e disponível no PATH do sistema para backups de PostgreSQL).
-3. Um banco de dados PostgreSQL livre para hospedar os metadados do VaultFlow.
-
----
-
-## Instalação e Configuração (Setup)
-
-**1. Clone o repositório**
-```bash
-git clone https://github.com/ariellucaslf/vault-flow.git
-cd vault-flow
+```text
+Operador → Painel Next.js → PostgreSQL de metadados
+                 └─ token interno → API única → Origem → S3 / Drive
 ```
 
-**2. Instale as dependências**
-O projeto utiliza `npm` workspaces.
-```bash
-npm install
+PostgreSQL gera `.dump` no formato custom; storage gera `.tar.gz`. O conteúdo passa por streams sem spool do backup em disco. A autenticação do `pg_dump` utiliza um arquivo temporário `.pgpass` com permissões restritas, removido ao encerrar o processo.
+
+S3 e serviços compatíveis são o caminho prioritário de validação. Google Drive é **experimental**: depende de configuração/permissões/quota do provedor e ainda requer homologação com credenciais reais. Na origem Drive, use uma pasta específica, sem prefixo; arquivos nativos Google Docs/Sheets/Slides e atalhos são rejeitados, pois exportação ainda não é suportada.
+
+## Requisitos
+
+- Node.js compatível com os manifests (mínimo 22.12; imagem da API usa Node 22) e npm 11.13.0. A versão de Node escolhida também precisa cumprir os requisitos do npm.
+- PostgreSQL de metadados exclusivo do VaultFlow.
+- Cliente `pg_dump` compatível com a versão do banco de origem, disponível no PATH da API.
+- Destino S3 compatível ou Drive configurado e acessível pelo servidor.
+
+A instalação por Docker Compose e o pipeline de CI ainda estão pendentes. O Dockerfile existente constrói somente a API, com contexto na raiz do monorepo. Não publique essa porta diretamente na internet.
+
+## Instalação local
+
+1. Clone o repositório e instale com `npm ci`.
+2. Copie `.env.example` para `.env` na raiz e preencha `DATABASE_URL`/`DIRECT_URL` do banco de metadados. Essas URLs não são as origens dos backups.
+3. Gere três segredos distintos: segredo de sessão (`NEXTAUTH_SECRET`), token de comunicação interna (`INTERNAL_API_TOKEN`, mínimo 32 caracteres) e chave de cifragem de 32 bytes.
+
+```sh
+mkdir -p .secrets
+chmod 700 .secrets
+openssl rand -hex 32 > .secrets/master.key
+chmod 600 .secrets/master.key
+openssl rand -base64 32
+openssl rand -hex 32
 ```
 
-**3. Configure as Variáveis de Ambiente**
-Na raiz do projeto (ou dentro de `apps/web`), copie o arquivo `.env.example` para `.env`:
-```bash
-cp .env.example .env
-```
-Preencha o `.env` com a URL do seu banco de dados principal (onde o Prisma salvará os dados do painel) e o `NEXTAUTH_SECRET`:
-```env
-DATABASE_URL="postgresql://user:password@localhost:5432/vaultflow_db?schema=public"
-NEXTAUTH_SECRET="gere_uma_chave_secreta_aleatoria_aqui"
-```
+As duas últimas saídas são para sessão e token interno; copie os valores para as variáveis correspondentes. Configure `VAULTFLOW_MASTER_KEY_FILE` com o **caminho absoluto** do arquivo `master.key`. Nunca gere uma nova chave para substituir silenciosamente uma perdida: as configurações salvas dependem dela.
 
-**4. Inicialize o Banco de Dados**
-Gere os arquivos do Prisma e crie as tabelas:
-```bash
-npm run generate -w @vault-flow/db
-npm run push -w @vault-flow/db
-```
+4. Defina `ADMIN_USERNAME` e `ADMIN_PASSWORD` explícitos. Não há credenciais padrão. Ajuste `NEXTAUTH_URL` ao endereço usado no navegador e `API_URL` à API interna.
+5. O Next.js carrega seu ambiente no workspace web. Crie `apps/web/.env.local` contendo `DATABASE_URL`, `DIRECT_URL`, `NEXTAUTH_SECRET`, `NEXTAUTH_URL`, `INTERNAL_API_TOKEN`, `API_URL`, `VAULTFLOW_MASTER_KEY_FILE` e, se usado, `ALLOWED_LOCAL_BACKUP_ROOTS` com os mesmos valores da configuração raiz. Arquivos de ambiente reais nunca entram no Git ou na imagem. A API e os scripts do banco já procuram `.env` na raiz.
+6. Gere/compile o pacote compartilhado, aplique migrations e crie a conta:
 
-**5. Crie seu Usuário Administrador (Seed)**
-Ainda no `.env`, defina suas credenciais pessoais para logar no painel:
-```env
-ADMIN_USERNAME="seu_usuario"
-ADMIN_PASSWORD="sua_senha_segura"
-```
-E rode o script de Seed para inserir o usuário no banco:
-```bash
+```sh
+npm run build -w @vault-flow/db
+npm run migrate:deploy -w @vault-flow/db
 npm run seed -w @vault-flow/db
-```
-
----
-
-## Como Executar Localmente
-
-Com o banco de dados rodando e o usuário criado, você pode iniciar o Monorepo inteiro com um único comando:
-
-```bash
 npm run dev
 ```
 
-Este comando (usando o Turborepo) irá subir simultaneamente:
-- O **Servidor API e Agendador de Backups** em `http://localhost:4000`
-- O **Painel Frontend (Next.js)** em `http://localhost:3000`
+Painel: `http://localhost:3000`; API: porta 4000; página introdutória: porta 3001. O pacote de banco precisa estar compilado antes do `dev`; recompile após alterar esse pacote. Use banco descartável para desenvolvimento de migrations. Não use `db push` como instalação de produção.
 
-Acesse `http://localhost:3000`, faça o login com as credenciais criadas no passo 5, e comece a adicionar seus Projetos!
+Em base antiga, faça cópia protegida e verifique o histórico antes de aplicar o baseline. Não rode `migrate reset` nem marque uma migration como aplicada sem conferir que os objetos correspondentes já existem. O caminho de atualização de uma base legada deve ser ensaiado numa cópia antes de produção.
 
----
+## Atualização de credenciais legadas
 
-## Guia de Credenciais de Nuvem
+Instalações anteriores à cifragem possuem `secretVersion=0`. Com a chave correta configurada e a API/painel parados para manutenção:
 
-No painel de "Novo Projeto", você precisará fornecer credenciais de destino em formato JSON.
-
-### AWS S3
-Crie um usuário IAM com permissão `s3:PutObject` para o seu Bucket. No formulário do VaultFlow, insira o seguinte JSON:
-```json
-{
-  "accessKeyId": "AKIAIOSFODNN7EXAMPLE",
-  "secretAccessKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-  "region": "us-east-1"
-}
+```sh
+npm run migrate:deploy -w @vault-flow/db
+npm run migrate:secrets -w @vault-flow/db
 ```
 
-### Google Drive
-1. Acesse o **Google Cloud Console**.
-2. Crie uma **Service Account** (Conta de Serviço) e gere uma chave em formato **JSON**.
-3. No Google Drive, crie a pasta onde quer salvar os backups e **compartilhe ela (como Editor)** com o email da Service Account criada.
-4. No formulário do VaultFlow:
-   - Em *Target/ID da Pasta*, coloque o ID da pasta (a sequência final na URL do Drive).
-   - Em *Credenciais JSON*, copie e cole **TODO o conteúdo** do arquivo JSON baixado do Google Cloud.
+O migrador é retomável e verifica a cifra em memória antes de gravar. O executor não usa plaintext como fallback. Preserve a chave separadamente da cópia do banco; backups antigos podem conter credenciais abertas e continuam sensíveis. O arquivo de backup da aplicação é compactado, não cifrado pelo VaultFlow.
 
----
+Reexecutar o seed preserva a senha existente. Para reset local explícito, defina usuário e nova senha no ambiente e execute:
 
-## Deploy em Produção (Nuvem)
+```sh
+npm run reset-admin -w @vault-flow/db
+```
 
-O VaultFlow foi arquitetado para rodar perfeitamente em serviços modernos de PaaS (Railway, Render, Fly.io, AWS ECS). 
+## Operação
 
-Como o motor de backup exige que o `pg_dump` esteja nativamente instalado no sistema operacional para bancos de dados, nós fornecemos um **Dockerfile** pronto para uso (`apps/api/Dockerfile`).
+- Uma réplica da API; sem fila distribuída ou retomada de upload pela metade.
+- A máquina precisa permanecer ligada. Horários perdidos durante indisponibilidade não são reproduzidos automaticamente.
+- Por padrão, uma execução por vez; disparo manual sem capacidade retorna ocupado.
+- `BACKUP_TIMEOUT_MS` é o prazo total de preparação, leitura e upload (padrão: 30 minutos). A limpeza tem até 5 segundos adicionais; falhas viram `FAILED`.
+- O cron é sincronizado no startup, após alterações do painel e periodicamente (`CRON_RECONCILE_INTERVAL_MS`, padrão: 60000). Falhas transitórias são repetidas sem duplicar tarefas.
+- `/health` e disparos retornam indisponibilidade enquanto o scheduler não está pronto. O encerramento solicita cancelamento dos backups; registros interrompidos são recuperados no próximo startup.
+- `ALLOWED_LOCAL_BACKUP_ROOTS` habilita origens locais apenas em raízes explícitas, separadas por vírgula. Monte somente os volumes necessários, sem filesystem inteiro, socket Docker ou diretório de segredos.
+- Não exponha banco/API; proteja acesso remoto ao painel com rede privada/túnel ou proxy HTTPS. Execute a API sem root e mantenha credenciais de origem/destino com permissões mínimas.
 
-**Recomendação de Infraestrutura:**
-1. **Frontend (Painel):** Hospede o `apps/web` na Vercel (Configuração padrão de Next.js).
-2. **Backend (Worker):** Hospede o `apps/api` no Railway apontando para o `Dockerfile` fornecido. Ele é construído em cima do `node:20-alpine` (super leve) e instala o `postgresql-client` automaticamente.
+A URI PostgreSQL pode fornecer senha em userinfo ou `?password=...`, que são removidos dos argumentos e transferidos ao `.pgpass`. Parâmetros que sobrescrevem host, arquivos ou comandos são rejeitados; somente opções explicitamente permitidas são repassadas. Configure TLS de acordo com a origem; não desabilite validação para contornar erros.
 
----
+## Restauração e Supabase
 
-## Contribuições
+O histórico registra URI do artefato, tamanho e SHA-256. Baixe o arquivo diretamente no destino e confira o hash:
 
-O VaultFlow é **Open-Source**. Sinta-se livre para fazer um Fork, reportar Issues ou abrir Pull Requests adicionando novos provedores de nuvem (como Azure Blob Storage, Cloudflare R2, Dropbox, etc).
+```sh
+shasum -a 256 backup.dump
+pg_restore --list backup.dump
+```
 
-Arquitetado e Desenvolvido por [Ariel Lucas](https://github.com/ariellucaslf).
+`--list` inspeciona o catálogo, mas não comprova recuperação. Restaure num PostgreSQL **descartável**, com cliente compatível, e confira dados, schema, sequences, constraints e demais objetos do escopo protegido. O destino de teste deve ser definido explicitamente; não restaure sobre produção como verificação.
+
+Para storage, confira o hash, inspecione `tar -tzf backup.tar.gz` e extraia em diretório isolado, verificando nomes, quantidade e conteúdo. As operações de exclusão de projeto não apagam os arquivos externos.
+
+No Supabase, conexão PostgreSQL usa credenciais de banco; uma API key HTTP não substitui essa autenticação. O dump não contém bytes do Storage: arquivos exigem configuração/cópia separada. Não há garantia de snapshot atômico entre banco e storage nem de recuperação integral da plataforma. Homologação de Supabase, uploads reais e restauração completa permanecem critérios de entrega a demonstrar.
+
+## Verificação e contribuição
+
+```sh
+npm run lint
+npm run check-types
+npm test
+npm run build
+```
+
+Os testes versionados usam `node:test` e simulam falhas de serviços externos. Cobrem cancelamento, timeout, leitura, uploads, cron, argumentos do processo e integridade de arquivo compactado. Não substituem testes reais com S3/Supabase/Drive, restauração de banco ou build da imagem Docker.
+
+Relate falhas com versões, passos e logs sanitizados, sem segredos ou dados de produção.
+
+Licença [MIT](LICENSE). Desenvolvido por [Ariel Lucas](https://github.com/ariellucaslf).
