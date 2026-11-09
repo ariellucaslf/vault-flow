@@ -240,6 +240,21 @@ export default function NewProjectPage() {
                 }
               })()}
             </p>
+
+            <div className="mt-4">
+              <label className="block text-sm font-medium text-neutral-300 mb-1">Fuso Horário do Agendamento (Timezone IANA)</label>
+              <select
+                name="timezone"
+                defaultValue="America/Sao_Paulo"
+                className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500 outline-none appearance-none text-sm"
+              >
+                <option value="America/Sao_Paulo">America/Sao_Paulo (BRT / UTC-3)</option>
+                <option value="UTC">UTC (Tempo Universal Coordenado)</option>
+                <option value="America/Manaus">America/Manaus (AMT / UTC-4)</option>
+                <option value="America/New_York">America/New_York (EST / EDT)</option>
+                <option value="Europe/Lisbon">Europe/Lisbon (WET / WEST)</option>
+              </select>
+            </div>
           </div>
         </div>
 
