@@ -15,7 +15,9 @@
     "push": "prisma db push",
     "migrate": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy",
+    "migrate:secrets": "tsx migrate-secrets.ts",
     "seed": "tsx seed.ts",
+    "reset-admin": "tsx seed.ts --reset-password",
     "lint": "eslint . --max-warnings 0",
     "check-types": "tsc --noEmit"
   },

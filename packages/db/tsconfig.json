@@ -9,6 +9,6 @@
     "forceConsistentCasingInFileNames": true,
     "outDir": "dist"
   },
-  "include": ["index.ts", "seed.ts"],
+  "include": ["index.ts", "crypto.ts", "seed.ts", "migrate-secrets.ts"],
   "exclude": ["node_modules", "dist"]
 }
