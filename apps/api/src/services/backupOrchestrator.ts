@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { PassThrough, Readable, Transform, TransformCallback } from 'stream';
-import { prisma } from '@vault-flow/db';
+import { decryptSecret, prisma } from '@vault-flow/db';
 import { executePgDump, sanitizeDiagnosticMessage } from './backupService';
 import {
   uploadToS3,
@@ -110,16 +110,19 @@ interface ProjectWithRelations {
   name: string;
   type: string;
   dbUrl: string | null;
+  secretVersion: number;
   destinations: Array<{
     id: string;
     type: string;
     credentials: string;
+    secretVersion: number;
     targetFolder: string;
   }>;
   storageSource: {
     id: string;
     type: string;
     credentials: string;
+    secretVersion: number;
     targetFolder: string;
     prefix: string | null;
   } | null;
@@ -134,14 +137,31 @@ async function executeBackupPipeline(project: ProjectWithRelations, logId: strin
   let sourceAbort: ((reason?: string) => void) | null = null;
 
   try {
-    // 1. Validar todos os destinos ANTES de iniciar qualquer processo de origem
+    // 1. Decifrar e validar todos os destinos ANTES de iniciar qualquer processo de origem
     if (project.destinations.length === 0) {
       throw new Error('Nenhum destino de backup configurado para este projeto.');
     }
 
-    const validatedDestinations: ValidatedDestination[] = project.destinations.map((dest) =>
-      validateDestinationConfig(dest)
-    );
+    const validatedDestinations: ValidatedDestination[] = project.destinations.map((dest) => {
+      if (dest.secretVersion !== 1) {
+        throw new Error(
+          `Credenciais do destino (${dest.type}) não estão cifradas (secretVersion=${dest.secretVersion}). Execute a migração de segredos.`
+        );
+      }
+
+      const decryptedCredentials = decryptSecret(dest.credentials, {
+        resourceType: 'Destination',
+        resourceId: dest.id,
+        field: 'credentials',
+      });
+
+      return validateDestinationConfig({
+        id: dest.id,
+        type: dest.type,
+        targetFolder: dest.targetFolder,
+        credentials: decryptedCredentials,
+      });
+    });
 
     const sanitizedName =
       project.name
@@ -214,7 +234,24 @@ async function executeBackupPipeline(project: ProjectWithRelations, logId: strin
         throw new Error('Origem de storage não configurada para este projeto.');
       }
 
-      storageResult = await executeStorageBackup(project.storageSource);
+      if (project.storageSource.secretVersion !== 1) {
+        throw new Error(
+          `Credenciais da origem de storage não estão cifradas (secretVersion=${project.storageSource.secretVersion}). Execute a migração de segredos.`
+        );
+      }
+
+      const decryptedSourceCredentials = decryptSecret(project.storageSource.credentials, {
+        resourceType: 'StorageSource',
+        resourceId: project.storageSource.id,
+        field: 'credentials',
+      });
+
+      storageResult = await executeStorageBackup({
+        type: project.storageSource.type,
+        targetFolder: project.storageSource.targetFolder,
+        prefix: project.storageSource.prefix,
+        credentials: decryptedSourceCredentials,
+      });
       sourceStream = storageResult.stream;
       sourceDonePromise = storageResult.donePromise;
       sourceAbort = storageResult.abort;
@@ -223,7 +260,19 @@ async function executeBackupPipeline(project: ProjectWithRelations, logId: strin
         throw new Error('URL de conexão com o banco de dados não configurada.');
       }
 
-      const pgExecution = executePgDump(project.dbUrl);
+      if (project.secretVersion !== 1) {
+        throw new Error(
+          `URL de conexão do projeto não está cifrada (secretVersion=${project.secretVersion}). Execute a migração de segredos.`
+        );
+      }
+
+      const decryptedDbUrl = decryptSecret(project.dbUrl, {
+        resourceType: 'Project',
+        resourceId: project.id,
+        field: 'dbUrl',
+      });
+
+      const pgExecution = executePgDump(decryptedDbUrl);
       sourceStream = pgExecution.stream;
       sourceDonePromise = pgExecution.donePromise;
       sourceAbort = pgExecution.abort;
