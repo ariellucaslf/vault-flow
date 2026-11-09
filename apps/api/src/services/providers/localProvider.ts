@@ -1,24 +1,27 @@
-import fs from 'fs';
-import path from 'path';
-import { Readable } from 'stream';
-import { IStorageProvider, StorageFileItem } from './storageProvider.interface';
+import fs from "fs";
+import path from "path";
+import { Readable } from "stream";
+import { IStorageProvider, StorageFileItem } from "./storageProvider.interface";
 
 export interface LocalProviderConfig {
   basePath: string;
 }
 
 const FORBIDDEN_SYSTEM_PREFIXES = [
-  '/etc',
-  '/proc',
-  '/sys',
-  '/dev',
-  '/run',
-  '/var/run',
-  '/private/etc',
-  '/private/var/run',
+  "/etc",
+  "/proc",
+  "/sys",
+  "/dev",
+  "/run",
+  "/var/run",
+  "/private/etc",
+  "/private/var/run",
 ];
 
-function isPathInsideRoot(candidateRealPath: string, rootRealPath: string): boolean {
+function isPathInsideRoot(
+  candidateRealPath: string,
+  rootRealPath: string,
+): boolean {
   if (candidateRealPath === rootRealPath) return true;
   const normalizedRoot = rootRealPath.endsWith(path.sep)
     ? rootRealPath
@@ -33,34 +36,36 @@ function isPathInsideRoot(candidateRealPath: string, rootRealPath: string): bool
 export function resolveAndValidateLocalBackupPath(rawBasePath: string): string {
   const trimmed = rawBasePath.trim();
   if (!trimmed || !path.isAbsolute(trimmed)) {
-    throw new Error('O caminho de origem LOCAL_PATH deve ser absoluto.');
+    throw new Error("O caminho de origem LOCAL_PATH deve ser absoluto.");
   }
 
-  const rawAllowedRoots = process.env.ALLOWED_LOCAL_BACKUP_ROOTS?.trim() || '';
+  const rawAllowedRoots = process.env.ALLOWED_LOCAL_BACKUP_ROOTS?.trim() || "";
   const allowedRoots = rawAllowedRoots
-    .split(',')
+    .split(",")
     .map((r) => r.trim())
-    .filter((r) => r.length > 0 && path.isAbsolute(r) && r !== '/');
+    .filter((r) => r.length > 0 && path.isAbsolute(r) && r !== "/");
 
   if (allowedRoots.length === 0) {
     throw new Error(
-      'Origem LOCAL_PATH desabilitada: configure ALLOWED_LOCAL_BACKUP_ROOTS com os diretórios de volume explicitamente permitidos.'
+      "Origem LOCAL_PATH desabilitada: configure ALLOWED_LOCAL_BACKUP_ROOTS com os diretórios de volume explicitamente permitidos.",
     );
   }
 
   if (!fs.existsSync(trimmed)) {
-    throw new Error('Diretório local de origem não encontrado.');
+    throw new Error("Diretório local de origem não encontrado.");
   }
 
   const realTarget = fs.realpathSync(trimmed);
   const stat = fs.statSync(realTarget);
   if (!stat.isDirectory()) {
-    throw new Error('O caminho local de origem deve ser um diretório válido.');
+    throw new Error("O caminho local de origem deve ser um diretório válido.");
   }
 
   for (const forbidden of FORBIDDEN_SYSTEM_PREFIXES) {
     if (realTarget === forbidden || realTarget.startsWith(`${forbidden}/`)) {
-      throw new Error('Acesso negado: diretório de sistema proibido como origem de backup.');
+      throw new Error(
+        "Acesso negado: diretório de sistema proibido como origem de backup.",
+      );
     }
   }
 
@@ -68,9 +73,12 @@ export function resolveAndValidateLocalBackupPath(rawBasePath: string): string {
   if (masterKeyFile && fs.existsSync(masterKeyFile)) {
     const realKeyFile = fs.realpathSync(masterKeyFile);
     const realKeyDir = path.dirname(realKeyFile);
-    if (isPathInsideRoot(realKeyFile, realTarget) || realTarget === realKeyDir) {
+    if (
+      isPathInsideRoot(realKeyFile, realTarget) ||
+      realTarget === realKeyDir
+    ) {
       throw new Error(
-        'Acesso negado: o diretório de origem não pode conter nem coincidir com o diretório da chave mestra.'
+        "Acesso negado: o diretório de origem não pode conter nem coincidir com o diretório da chave mestra.",
       );
     }
   }
@@ -83,12 +91,12 @@ export function resolveAndValidateLocalBackupPath(rawBasePath: string): string {
   }
 
   const isAllowed = realAllowedRoots.some((allowedRoot) =>
-    isPathInsideRoot(realTarget, allowedRoot)
+    isPathInsideRoot(realTarget, allowedRoot),
   );
 
   if (!isAllowed) {
     throw new Error(
-      'Acesso negado: o caminho local informado está fora dos volumes permitidos em ALLOWED_LOCAL_BACKUP_ROOTS.'
+      "Acesso negado: o caminho local informado está fora dos volumes permitidos em ALLOWED_LOCAL_BACKUP_ROOTS.",
     );
   }
 
@@ -102,17 +110,23 @@ export class LocalStorageProvider implements IStorageProvider {
     this.realBasePath = resolveAndValidateLocalBackupPath(config.basePath);
   }
 
-  async listFiles(prefix?: string): Promise<StorageFileItem[]> {
+  async listFiles(
+    prefix?: string,
+    signal?: AbortSignal,
+  ): Promise<StorageFileItem[]> {
+    signal?.throwIfAborted();
     let targetDir = this.realBasePath;
     if (prefix && prefix.trim()) {
-      const sanitizedPrefix = prefix.trim().replace(/^\/+/, '');
+      const sanitizedPrefix = prefix.trim().replace(/^\/+/, "");
       const candidateDir = path.resolve(this.realBasePath, sanitizedPrefix);
       if (!fs.existsSync(candidateDir)) {
-        throw new Error('Subpasta/prefixo local não encontrado.');
+        throw new Error("Subpasta/prefixo local não encontrado.");
       }
       const realCandidateDir = await fs.promises.realpath(candidateDir);
       if (!isPathInsideRoot(realCandidateDir, this.realBasePath)) {
-        throw new Error('Acesso negado: prefixo aponta para fora da raiz permitida.');
+        throw new Error(
+          "Acesso negado: prefixo aponta para fora da raiz permitida.",
+        );
       }
       targetDir = realCandidateDir;
     }
@@ -122,6 +136,7 @@ export class LocalStorageProvider implements IStorageProvider {
     const walk = async (dir: string): Promise<void> => {
       const entries = await fs.promises.readdir(dir, { withFileTypes: true });
       for (const entry of entries) {
+        signal?.throwIfAborted();
         // Ignora symlinks para impedir escape de diretório
         if (entry.isSymbolicLink()) {
           continue;
@@ -131,15 +146,23 @@ export class LocalStorageProvider implements IStorageProvider {
         const realFullPath = await fs.promises.realpath(fullPath);
 
         if (!isPathInsideRoot(realFullPath, this.realBasePath)) {
-          throw new Error('Acesso negado: detectado caminho fora da raiz permitida.');
+          throw new Error(
+            "Acesso negado: detectado caminho fora da raiz permitida.",
+          );
         }
 
         if (entry.isDirectory()) {
           await walk(realFullPath);
         } else if (entry.isFile()) {
           const stat = await fs.promises.stat(realFullPath);
-          const relativeKey = path.relative(this.realBasePath, realFullPath).replace(/\\/g, '/');
-          if (!relativeKey || relativeKey.startsWith('..') || path.isAbsolute(relativeKey)) {
+          const relativeKey = path
+            .relative(this.realBasePath, realFullPath)
+            .replace(/\\/g, "/");
+          if (
+            !relativeKey ||
+            relativeKey.startsWith("..") ||
+            path.isAbsolute(relativeKey)
+          ) {
             continue;
           }
           items.push({
@@ -155,22 +178,26 @@ export class LocalStorageProvider implements IStorageProvider {
     return items;
   }
 
-  async getFileStream(item: StorageFileItem): Promise<Readable> {
-    if (!item.key || item.key.includes('\0') || path.isAbsolute(item.key)) {
-      throw new Error('Chave de arquivo local inválida.');
+  async getFileStream(
+    item: StorageFileItem,
+    signal?: AbortSignal,
+  ): Promise<Readable> {
+    if (!item.key || item.key.includes("\0") || path.isAbsolute(item.key)) {
+      throw new Error("Chave de arquivo local inválida.");
     }
 
     const candidatePath = path.resolve(this.realBasePath, item.key);
     const lstat = await fs.promises.lstat(candidatePath);
     if (lstat.isSymbolicLink() || !lstat.isFile()) {
-      throw new Error('Acesso negado: symlink ou arquivo inválido.');
+      throw new Error("Acesso negado: symlink ou arquivo inválido.");
     }
 
     const realFilePath = await fs.promises.realpath(candidatePath);
     if (!isPathInsideRoot(realFilePath, this.realBasePath)) {
-      throw new Error('Acesso negado: o arquivo está fora da raiz permitida.');
+      throw new Error("Acesso negado: o arquivo está fora da raiz permitida.");
     }
 
-    return fs.createReadStream(realFilePath);
+    signal?.throwIfAborted();
+    return fs.createReadStream(realFilePath, { signal });
   }
 }

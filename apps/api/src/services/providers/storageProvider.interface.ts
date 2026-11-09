@@ -1,4 +1,4 @@
-import { Readable } from 'stream';
+import { Readable } from "stream";
 
 export interface StorageFileItem {
   key: string;
@@ -11,10 +11,12 @@ export interface IStorageProvider {
   /**
    * Lista todos os arquivos do storage de origem sob um prefixo/pasta opcional
    */
-  listFiles(prefix?: string): Promise<StorageFileItem[]>;
+  listFiles(prefix?: string, signal?: AbortSignal): Promise<StorageFileItem[]>;
 
   /**
    * Retorna um Readable stream para download do arquivo especificado
    */
-  getFileStream(item: StorageFileItem): Promise<Readable>;
+  getFileStream(item: StorageFileItem, signal?: AbortSignal): Promise<Readable>;
+
+  dispose?(): void;
 }
